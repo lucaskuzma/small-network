@@ -292,26 +292,15 @@ network.set_diagonal_weights(0)  # no self-feedback
 network.enable_activation_leak(0.97)
 network.enable_refraction_decay(5, 0.5)
 
-
-history = {"activations": [], "firing": [], "outputs": [], "step": []}
-
 # input patterns
 stimulators = [
-    [1, 0, 0, 0, 0, 0, 0, 0],
-    [0],
-    [0],
-    [0],
-    [0],
     [1, 0, 0, 0, 0, 0, 0, 0],
 ]
 stimulator_strength = 0.25
 
-# Initial state
-# network.manual_trigger(0)
-# history["activations"].append(network.state.activations.copy())
-# history["step"].append(0)
+history = {"activations": [], "firing": [], "outputs": [], "step": []}
 
-# Run simulation
+# run simulation
 for step in range(steps):
     # network.manual_activate(0, 0.1)
     for i, pattern in enumerate(stimulators):
