@@ -133,34 +133,6 @@ class NeuralNetwork:
         self.state.firing = np.zeros(self.state.num_neurons, dtype=bool)
         self.state.outputs = np.zeros(self.state.num_neurons)
 
-    def update_network_weight(self, row: int, col: int, value: float):
-        if not (
-            0 <= row < self.state.num_neurons and 0 <= col < self.state.num_neurons
-        ):
-            raise ValueError(
-                f"Indices must be between 0 and {self.state.num_neurons - 1}"
-            )
-
-        self.state.network_weights[row, col] = np.clip(value, 0, 1)
-
-    def update_threshold(self, index: int, value: float):
-        if not 0 <= index < self.state.num_neurons:
-            raise ValueError(
-                f"Index must be between 0 and {self.state.num_neurons - 1}"
-            )
-
-        self.state.thresholds[index] = np.clip(value, 0, 1)
-
-    def update_output_weight(self, row: int, col: int, value: float):
-        if not (
-            0 <= row < self.state.num_neurons and 0 <= col < self.state.num_neurons
-        ):
-            raise ValueError(
-                f"Indices must be between 0 and {self.state.num_neurons - 1}"
-            )
-
-        self.state.output_weights[row, col] = np.clip(value, 0, 1)
-
     def enable_activation_leak(self, leak_factor: float = 0.95):
         self.state.use_activation_leak = True
         self.state.activation_leak = np.clip(leak_factor, 0, 1)
