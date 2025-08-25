@@ -23,6 +23,7 @@ class NeuralNetworkState:
     refraction_leak: float = 0.4
     use_refraction_decay: bool = False
     refraction_period: int = 3
+    use_tanh_activation: bool = False
 
     def __post_init__(self):
         self.network_weights = np.zeros((self.num_neurons, self.num_neurons))
@@ -59,11 +60,20 @@ class NeuralNetwork:
                         # add weight from firing neuron j to current neuron i
                         incoming_activation += self.state.network_weights[j, i]
 
+                # normalize incoming activation
                 incoming_activation /= self.state.num_neurons
-                new_activations[i] = np.clip(
-                    new_activations[i] + incoming_activation, 0, 1
-                )
 
+                # clip or saturate activation
+                if self.state.use_tanh_activation:
+                    new_activations[i] = (
+                        np.tanh(new_activations[i] + incoming_activation) + 1
+                    ) / 2
+                else:
+                    new_activations[i] = np.clip(
+                        new_activations[i] + incoming_activation, 0, 1
+                    )
+
+                # check if neuron should fire
                 if new_activations[i] >= self.state.thresholds[i]:
 
                     # fire!
