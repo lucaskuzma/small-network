@@ -51,23 +51,27 @@ class NeuralNetwork:
 
         for i in range(self.state.num_neurons):
             # sum up incoming activation from all firing neurons
-            incoming_activation = 0
-            for j in range(self.state.num_neurons):
-                if self.state.firing[j]:
-                    # add weight from firing neuron j to current neuron i
-                    incoming_activation += self.state.network_weights[j, i]
 
-            new_activations[i] = np.clip(new_activations[i] + incoming_activation, 0, 1)
+            if not self.state.use_refraction_decay or new_refractory_counters[i] == 0:
+                incoming_activation = 0
+                for j in range(self.state.num_neurons):
+                    if self.state.firing[j]:
+                        # add weight from firing neuron j to current neuron i
+                        incoming_activation += self.state.network_weights[j, i]
 
-            if new_activations[i] >= self.state.thresholds[i]:
+                new_activations[i] = np.clip(
+                    new_activations[i] + incoming_activation, 0, 1
+                )
 
-                # fire!
-                new_firing[i] = True
+                if new_activations[i] >= self.state.thresholds[i]:
 
-                if self.state.use_refraction_decay:
-                    new_refractory_counters[i] = self.state.refraction_period
-                else:
-                    new_activations[i] = 0
+                    # fire!
+                    new_firing[i] = True
+
+                    if self.state.use_refraction_decay:
+                        new_refractory_counters[i] = self.state.refraction_period
+                    else:
+                        new_activations[i] = 0
 
             if self.state.use_refraction_decay:
                 if new_refractory_counters[i] > 0:
@@ -246,7 +250,7 @@ print(network.state.network_weights)
 network.state.thresholds = np.full((network.state.num_neurons,), 0.9)
 
 network.enable_activation_leak(0.97)
-network.enable_refraction_decay(5, 0.2)
+network.enable_refraction_decay(4, 0.5)
 
 
 history = {"activations": [], "firing": [], "outputs": [], "step": []}
@@ -255,7 +259,7 @@ history = {"activations": [], "firing": [], "outputs": [], "step": []}
 stimulators = [
     [1, 0, 0, 0, 0, 0, 0, 0],
 ]
-stimulator_strength = 0.25
+stimulator_strength = 0.5
 
 # Initial state
 # network.manual_trigger(0)
