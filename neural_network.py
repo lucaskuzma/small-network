@@ -1,39 +1,28 @@
-import numpy as np
-from typing import List, Tuple, Optional
+# %%
+
+from typing import Optional
 from dataclasses import dataclass, field
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 @dataclass
 class NeuralNetworkState:
-    network_weights: np.ndarray
-    thresholds: np.ndarray
-    output_weights: np.ndarray
-    activations: np.ndarray
-    firing: np.ndarray
-    outputs: np.ndarray
+    network_weights: np.ndarray = field(default_factory=lambda: np.zeros((4, 4)))
+    thresholds: np.ndarray = field(default_factory=lambda: np.full((4,), 0.5))
+    output_weights: np.ndarray = field(default_factory=lambda: np.eye(4))
+    activations: np.ndarray = field(default_factory=lambda: np.zeros(4))
+    firing: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=bool))
+    outputs: np.ndarray = field(default_factory=lambda: np.zeros(4))
 
     use_activation_leak: bool = False
     activation_leak: float = 0.95
     use_refraction_decay: bool = False
     refraction_period: int = 3
-    refractory_counters: np.ndarray = None
-
-    def __init__(self, **kwargs):
-        self.network_weights = kwargs.get("network_weights", np.zeros((4, 4)))
-        self.thresholds = kwargs.get("thresholds", np.full((4,), 0.5))
-        self.output_weights = kwargs.get("output_weights", np.eye(4))
-        self.activations = kwargs.get("activations", np.zeros(4))
-        self.firing = kwargs.get("firing", np.zeros(4, dtype=bool))
-        self.outputs = kwargs.get("outputs", np.zeros(4))
-        # dynamics
-        self.use_activation_leak = kwargs.get("use_activation_leak", False)
-        self.activation_leak = kwargs.get("activation_leak", 0.95)
-        self.use_refraction_decay = kwargs.get("use_refraction_decay", False)
-        self.refraction_period = kwargs.get("refraction_period", 3)
-        # refractory counters
-        self.refractory_counters = kwargs.get(
-            "refractory_counters", np.zeros(4, dtype=int)
-        )
+    refractory_counters: np.ndarray = field(
+        default_factory=lambda: np.zeros(4, dtype=int)
+    )
 
 
 class NeuralNetwork:
@@ -144,30 +133,7 @@ class NeuralNetwork:
     def disable_refraction_decay(self):
         self.state.use_refraction_decay = False
 
-    def set_dynamics_parameters(
-        self,
-        use_activation_leak: bool = None,
-        activation_leak: float = None,
-        use_refraction_decay: bool = None,
-        refraction_period: int = None,
-    ):
-        if use_activation_leak is not None:
-            self.state.use_activation_leak = use_activation_leak
-        if activation_leak is not None:
-            self.state.activation_leak = np.clip(activation_leak, 0, 1)
-        if use_refraction_decay is not None:
-            self.state.use_refraction_decay = use_refraction_decay
-        if refraction_period is not None:
-            self.state.refraction_period = max(1, refraction_period)
-
-    def reset_dynamics_to_defaults(self):
-        self.state.use_activation_leak = False
-        self.state.activation_leak = 0.95
-        self.state.use_refraction_decay = False
-        self.state.refraction_period = 3
-
     def randomize_weights(self):
-        # Randomize network weights (0 to 1)
         self.state.network_weights = np.random.random((4, 4))
 
     def clear(self):
@@ -189,3 +155,87 @@ class NeuralNetwork:
 
     def __repr__(self) -> str:
         return f"NeuralNetwork(state={self.state})"
+
+
+# =======================================================================
+def plot_neural_heatmap(history, data_type="activations"):
+    steps_to_show = len(history.get("step", []))
+    tick_step = steps_to_show // 16
+
+    data_matrix = np.array(history[data_type][:steps_to_show])
+
+    fig, ax = plt.subplots(figsize=(16, 4))
+
+    sns.heatmap(
+        data_matrix.T,
+        annot=False,
+        cmap="viridis",
+        vmin=0,
+        vmax=1,
+        ax=ax,
+        cbar_kws={"label": f"{data_type.capitalize()} Value"},
+        yticklabels=[f"N{i}" for i in range(4)],
+    )
+
+    tick_positions = np.arange(0, steps_to_show, tick_step)
+    tick_labels = history["step"][:steps_to_show:][::tick_step]
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels(tick_labels)
+
+    ax.set_xlabel("Time Step")
+    ax.set_ylabel("Neuron")
+    ax.set_title(f"Neural Network {data_type.capitalize()} Over Time")
+
+    plt.tight_layout()
+    plt.show()
+
+
+# =======================================================================
+
+network = NeuralNetwork()
+steps = 256
+network.clear()
+
+network.update_network_weight(0, 1, 0.5)  # N0 → N1
+network.update_network_weight(1, 2, 0.5)  # N1 → N2
+network.update_network_weight(2, 3, 0.5)  # N2 → N3
+network.update_network_weight(3, 0, 0.5)  # N3 → N0 (feedback loop)
+
+network.state.thresholds = np.full((4,), 0.75)
+
+network.set_output_identity()
+
+network.enable_activation_leak(0.9)
+network.enable_refraction_decay(3)
+
+
+history = {"activations": [], "firing": [], "outputs": [], "step": []}
+
+# input patterns
+stimulators = [
+    [1, 0, 0, 0],
+    [0, 1, 0, 0, 0, 0],
+    [0, 0, 0, 0],
+    [0, 0, 0, 0],
+]
+stimulator_strength = 0.2
+
+# Initial state
+# network.manual_trigger(0)
+# history["activations"].append(network.state.activations.copy())
+# history["step"].append(0)
+
+# Run simulation
+for step in range(steps):
+    # network.manual_activate(0, 0.1)
+    for i, pattern in enumerate(stimulators):
+        network.manual_activate(i, pattern[step % 4] * stimulator_strength)
+    network.tick()
+    history["activations"].append(network.state.activations.copy())
+    history["firing"].append(network.state.firing.copy())
+    history["outputs"].append(network.state.outputs.copy())
+    history["step"].append(step)
+
+# Call the function to plot both heatmaps
+plot_neural_heatmap(history, "activations")
+plot_neural_heatmap(history, "firing")
