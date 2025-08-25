@@ -223,7 +223,7 @@ print(network.state.network_weights)
 
 network.state.thresholds = np.full((4,), 0.9)
 
-network.enable_activation_leak(0.95)
+network.enable_activation_leak(0.98)
 network.enable_refraction_decay(5, 0.2)
 
 
@@ -231,12 +231,12 @@ history = {"activations": [], "firing": [], "outputs": [], "step": []}
 
 # input patterns
 stimulators = [
-    [1, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
     [0, 0, 0, 0],
     [0, 0, 0, 0],
 ]
-stimulator_strength = 0.2
+stimulator_strength = 0.25
 
 # Initial state
 # network.manual_trigger(0)
