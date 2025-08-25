@@ -89,7 +89,8 @@ class NeuralNetwork:
                     new_activations[i] *= self.state.refraction_leak
 
         # Calculate outputs based on firing neurons
-        new_outputs = np.zeros(self.state.num_neurons)
+        new_outputs = self.state.outputs.copy()
+        new_outputs *= self.state.refraction_leak
         for i in range(self.state.num_neurons):
             if new_firing[i]:
                 for j in range(self.state.num_neurons):
@@ -152,6 +153,11 @@ class NeuralNetwork:
 
     def randomize_weights(self):
         self.state.network_weights = np.random.random(
+            (self.state.num_neurons, self.state.num_neurons)
+        )
+
+    def randomize_output_weights(self):
+        self.state.output_weights = np.random.random(
             (self.state.num_neurons, self.state.num_neurons)
         )
 
@@ -259,6 +265,7 @@ network.set_output_identity()
 network.randomize_weights()
 # network.sinusoidal_weights()
 network.randomize_thresholds()
+# network.randomize_output_weights()
 network.set_diagonal_weights(0)  # no self-feedback
 
 network.enable_activation_leak(0.97)
@@ -287,6 +294,7 @@ for step in range(steps):
 plot_weight_heatmap(network.state.num_neurons)
 plot_neural_heatmap(history, "activations", network.state.num_neurons)
 plot_neural_heatmap(history, "firing", network.state.num_neurons)
+plot_neural_heatmap(history, "outputs", network.state.num_neurons)
 
 # %%
 
@@ -301,7 +309,7 @@ def play_neural_outputs_live(history, tempo=120):
     pygame.init()
 
     # Map each neuron to a different frequency
-    base_freq = 220  # A3
+    base_freq = 110  # A2
     freq_ratio = 2 ** (1 / 12)  # Semitone ratio
 
     # Calculate time per step
@@ -312,7 +320,7 @@ def play_neural_outputs_live(history, tempo=120):
         mixed_audio = np.zeros(int(44100 * step_duration))
 
         for neuron_idx, output_value in enumerate(outputs):
-            if output_value > 0.1:  # Threshold for activation
+            if output_value > 0.9:  # Threshold for activation
                 # Map neuron index to frequency (each neuron gets a different note)
                 frequency = base_freq * (freq_ratio ** ((neuron_idx * 5) % 36))
 
