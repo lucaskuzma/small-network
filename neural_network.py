@@ -151,7 +151,6 @@ class NeuralNetwork:
         self.state.output_weights[row, col] = np.clip(value, 0, 1)
 
     def enable_activation_leak(self, leak_factor: float = 0.95):
-
         self.state.use_activation_leak = True
         self.state.activation_leak = np.clip(leak_factor, 0, 1)
 
@@ -172,6 +171,16 @@ class NeuralNetwork:
         self.state.network_weights = np.random.random(
             (self.state.num_neurons, self.state.num_neurons)
         )
+
+    def randomize_thresholds(self):
+        self.state.thresholds = np.random.random(self.state.num_neurons)
+
+    def sinusoidal_weights(self):
+        for i in range(self.state.num_neurons):
+            for j in range(self.state.num_neurons):
+                self.state.network_weights[i, j] = (
+                    np.sin((i + j) * np.pi / self.state.num_neurons) * 0.5 + 0.5
+                )
 
     def set_diagonal_weights(self, value: float):
         for i in range(self.state.num_neurons):
@@ -196,6 +205,27 @@ class NeuralNetwork:
 
     def __repr__(self) -> str:
         return f"NeuralNetwork(state={self.state})"
+
+
+# =======================================================================
+def plot_weight_heatmap(num_neurons=64):
+    data_matrix = np.array(network.state.network_weights)
+
+    fig, ax = plt.subplots(figsize=(16, 8))
+
+    sns.heatmap(
+        data_matrix.T,
+        annot=False,
+        cmap="viridis",
+        vmin=0,
+        vmax=1,
+        ax=ax,
+        cbar_kws={"label": f"Weight Value"},
+        yticklabels=[f"N{i}" for i in range(num_neurons)],
+    )
+
+    plt.tight_layout()
+    plt.show()
 
 
 # =======================================================================
@@ -244,13 +274,12 @@ network.set_output_identity()
 # network.update_network_weight(3, 0, 0.5)  # N3 → N0 (feedback loop)
 
 network.randomize_weights()
+# network.sinusoidal_weights()
+network.randomize_thresholds()
 network.set_diagonal_weights(0)  # no self-feedback
-print(network.state.network_weights)
-
-network.state.thresholds = np.full((network.state.num_neurons,), 0.9)
 
 network.enable_activation_leak(0.97)
-network.enable_refraction_decay(4, 0.5)
+network.enable_refraction_decay(5, 0.5)
 
 
 history = {"activations": [], "firing": [], "outputs": [], "step": []}
@@ -258,8 +287,13 @@ history = {"activations": [], "firing": [], "outputs": [], "step": []}
 # input patterns
 stimulators = [
     [1, 0, 0, 0, 0, 0, 0, 0],
+    [0],
+    [0],
+    [0],
+    [0],
+    [1, 0, 0, 0, 0, 0, 0, 0],
 ]
-stimulator_strength = 0.5
+stimulator_strength = 0.25
 
 # Initial state
 # network.manual_trigger(0)
@@ -268,15 +302,16 @@ stimulator_strength = 0.5
 
 # Run simulation
 for step in range(steps):
-    network.tick()
     # network.manual_activate(0, 0.1)
     for i, pattern in enumerate(stimulators):
         network.manual_activate(i, pattern[step % len(pattern)] * stimulator_strength)
+    network.tick()
     history["activations"].append(network.state.activations.copy())
     history["firing"].append(network.state.firing.copy())
     history["outputs"].append(network.state.outputs.copy())
     history["step"].append(step)
 
-# Call the function to plot both heatmaps
+
+plot_weight_heatmap(network.state.num_neurons)
 plot_neural_heatmap(history, "activations", network.state.num_neurons)
 plot_neural_heatmap(history, "firing", network.state.num_neurons)
