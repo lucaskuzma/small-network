@@ -40,12 +40,14 @@ class NeuralNetwork:
         new_refractory_counters = self.state.refractory_counters.copy()
 
         for i in range(4):
-            activation = 0
+            # sum up incoming activation from all firing neurons
+            incoming_activation = 0
             for j in range(4):
                 if self.state.firing[j]:
-                    activation += self.state.network_weights[j, i]
+                    # add weight from firing neuron j to current neuron i
+                    incoming_activation += self.state.network_weights[j, i]
 
-            new_activations[i] = np.clip(new_activations[i] + activation, 0, 1)
+            new_activations[i] = np.clip(new_activations[i] + incoming_activation, 0, 1)
 
             if new_activations[i] >= self.state.thresholds[i]:
 
@@ -143,6 +145,9 @@ class NeuralNetwork:
     def randomize_weights(self):
         self.state.network_weights = np.random.random((4, 4))
 
+    def set_diagonal_weights(self, value: float):
+        self.state.network_weights = np.eye(4) * value
+
     def clear(self):
         self.state = NeuralNetworkState()
 
@@ -202,18 +207,20 @@ def plot_neural_heatmap(history, data_type="activations"):
 network = NeuralNetwork()
 steps = 256
 network.clear()
-
-network.update_network_weight(0, 1, 0.5)  # N0 → N1
-network.update_network_weight(1, 2, 0.5)  # N1 → N2
-network.update_network_weight(2, 3, 0.5)  # N2 → N3
-network.update_network_weight(3, 0, 0.5)  # N3 → N0 (feedback loop)
-
-network.state.thresholds = np.full((4,), 0.75)
-
 network.set_output_identity()
 
-network.enable_activation_leak(0.99)
-network.enable_refraction_decay(5, 0.7)
+# network.update_network_weight(0, 1, 0.5)  # N0 → N1
+# network.update_network_weight(1, 2, 0.5)  # N1 → N2
+# network.update_network_weight(2, 3, 0.5)  # N2 → N3
+# network.update_network_weight(3, 0, 0.5)  # N3 → N0 (feedback loop)
+
+network.randomize_weights()
+network.set_diagonal_weights(0)  # no feedback loop
+
+network.state.thresholds = np.full((4,), 0.5)
+
+# network.enable_activation_leak(0.99)
+# network.enable_refraction_decay(5, 0.3)
 
 
 history = {"activations": [], "firing": [], "outputs": [], "step": []}
@@ -236,7 +243,7 @@ stimulator_strength = 0.2
 for step in range(steps):
     # network.manual_activate(0, 0.1)
     for i, pattern in enumerate(stimulators):
-        network.manual_activate(i, pattern[step % 4] * stimulator_strength)
+        network.manual_activate(i, pattern[step % len(pattern)] * stimulator_strength)
     network.tick()
     history["activations"].append(network.state.activations.copy())
     history["firing"].append(network.state.firing.copy())
