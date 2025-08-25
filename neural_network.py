@@ -9,40 +9,50 @@ import seaborn as sns
 
 @dataclass
 class NeuralNetworkState:
-    network_weights: np.ndarray = field(default_factory=lambda: np.zeros((4, 4)))
-    thresholds: np.ndarray = field(default_factory=lambda: np.full((4,), 0.5))
-    output_weights: np.ndarray = field(default_factory=lambda: np.eye(4))
-    activations: np.ndarray = field(default_factory=lambda: np.zeros(4))
-    firing: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=bool))
-    outputs: np.ndarray = field(default_factory=lambda: np.zeros(4))
+    num_neurons: int = 64
+    network_weights: np.ndarray = field(init=False)
+    thresholds: np.ndarray = field(init=False)
+    output_weights: np.ndarray = field(init=False)
+    activations: np.ndarray = field(init=False)
+    firing: np.ndarray = field(init=False)
+    outputs: np.ndarray = field(init=False)
+    refractory_counters: np.ndarray = field(init=False)
 
     use_activation_leak: bool = False
     activation_leak: float = 0.95
     refraction_leak: float = 0.4
     use_refraction_decay: bool = False
     refraction_period: int = 3
-    refractory_counters: np.ndarray = field(
-        default_factory=lambda: np.zeros(4, dtype=int)
-    )
+
+    def __post_init__(self):
+        self.network_weights = np.zeros((self.num_neurons, self.num_neurons))
+        self.thresholds = np.full((self.num_neurons,), 0.5)
+        self.output_weights = np.eye(self.num_neurons)
+        self.activations = np.zeros(self.num_neurons)
+        self.firing = np.zeros(self.num_neurons, dtype=bool)
+        self.outputs = np.zeros(self.num_neurons)
+        self.refractory_counters = np.zeros(self.num_neurons, dtype=int)
 
 
 class NeuralNetwork:
-    def __init__(self, initial_state: Optional[NeuralNetworkState] = None):
+    def __init__(
+        self, num_neurons: int = 64, initial_state: Optional[NeuralNetworkState] = None
+    ):
         if initial_state is None:
-            self.state = NeuralNetworkState()
+            self.state = NeuralNetworkState(num_neurons=num_neurons)
         else:
             self.state = initial_state
 
     def tick(self):
         # Calculate new activations from current firing neurons
         new_activations = self.state.activations.copy()
-        new_firing = np.zeros(4, dtype=bool)
+        new_firing = np.zeros(self.state.num_neurons, dtype=bool)
         new_refractory_counters = self.state.refractory_counters.copy()
 
-        for i in range(4):
+        for i in range(self.state.num_neurons):
             # sum up incoming activation from all firing neurons
             incoming_activation = 0
-            for j in range(4):
+            for j in range(self.state.num_neurons):
                 if self.state.firing[j]:
                     # add weight from firing neuron j to current neuron i
                     incoming_activation += self.state.network_weights[j, i]
@@ -64,10 +74,10 @@ class NeuralNetwork:
                     new_activations[i] *= self.state.refraction_leak
 
         # Calculate outputs based on firing neurons
-        new_outputs = np.zeros(4)
-        for i in range(4):
+        new_outputs = np.zeros(self.state.num_neurons)
+        for i in range(self.state.num_neurons):
             if new_firing[i]:
-                for j in range(4):
+                for j in range(self.state.num_neurons):
                     new_outputs[j] += self.state.output_weights[i, j]
 
         # Apply activation leak if enabled
@@ -86,8 +96,10 @@ class NeuralNetwork:
             self.state.refractory_counters = new_refractory_counters
 
     def manual_trigger(self, neuron_index: int):
-        if not 0 <= neuron_index < 4:
-            raise ValueError("Neuron index must be between 0 and 3")
+        if not 0 <= neuron_index < self.state.num_neurons:
+            raise ValueError(
+                f"Neuron index must be between 0 and {self.state.num_neurons - 1}"
+            )
 
         # Set the neuron to fire
         # self.state.firing[neuron_index] = True
@@ -103,24 +115,34 @@ class NeuralNetwork:
 
     def clear_firing(self):
         """Clear all firing states and outputs."""
-        self.state.firing = np.zeros(4, dtype=bool)
-        self.state.outputs = np.zeros(4)
+        self.state.firing = np.zeros(self.state.num_neurons, dtype=bool)
+        self.state.outputs = np.zeros(self.state.num_neurons)
 
     def update_network_weight(self, row: int, col: int, value: float):
-        if not (0 <= row < 4 and 0 <= col < 4):
-            raise ValueError("Indices must be between 0 and 3")
+        if not (
+            0 <= row < self.state.num_neurons and 0 <= col < self.state.num_neurons
+        ):
+            raise ValueError(
+                f"Indices must be between 0 and {self.state.num_neurons - 1}"
+            )
 
         self.state.network_weights[row, col] = np.clip(value, 0, 1)
 
     def update_threshold(self, index: int, value: float):
-        if not 0 <= index < 4:
-            raise ValueError("Index must be between 0 and 3")
+        if not 0 <= index < self.state.num_neurons:
+            raise ValueError(
+                f"Index must be between 0 and {self.state.num_neurons - 1}"
+            )
 
         self.state.thresholds[index] = np.clip(value, 0, 1)
 
     def update_output_weight(self, row: int, col: int, value: float):
-        if not (0 <= row < 4 and 0 <= col < 4):
-            raise ValueError("Indices must be between 0 and 3")
+        if not (
+            0 <= row < self.state.num_neurons and 0 <= col < self.state.num_neurons
+        ):
+            raise ValueError(
+                f"Indices must be between 0 and {self.state.num_neurons - 1}"
+            )
 
         self.state.output_weights[row, col] = np.clip(value, 0, 1)
 
@@ -143,19 +165,19 @@ class NeuralNetwork:
         self.state.use_refraction_decay = False
 
     def randomize_weights(self):
-        self.state.network_weights = np.random.random((4, 4))
+        self.state.network_weights = np.random.random(
+            (self.state.num_neurons, self.state.num_neurons)
+        )
 
     def set_diagonal_weights(self, value: float):
-        self.state.network_weights[0, 0] = value
-        self.state.network_weights[1, 1] = value
-        self.state.network_weights[2, 2] = value
-        self.state.network_weights[3, 3] = value
+        for i in range(self.state.num_neurons):
+            self.state.network_weights[i, i] = value
 
     def clear(self):
-        self.state = NeuralNetworkState()
+        self.state = NeuralNetworkState(num_neurons=self.state.num_neurons)
 
     def set_output_identity(self):
-        self.state.output_weights = np.eye(4)
+        self.state.output_weights = np.eye(self.state.num_neurons)
 
     def get_network_summary(self) -> dict:
         return {
@@ -173,13 +195,13 @@ class NeuralNetwork:
 
 
 # =======================================================================
-def plot_neural_heatmap(history, data_type="activations"):
+def plot_neural_heatmap(history, data_type="activations", num_neurons=64):
     steps_to_show = len(history.get("step", []))
     tick_step = steps_to_show // 16
 
     data_matrix = np.array(history[data_type][:steps_to_show])
 
-    fig, ax = plt.subplots(figsize=(16, 4))
+    fig, ax = plt.subplots(figsize=(16, 8))
 
     sns.heatmap(
         data_matrix.T,
@@ -189,7 +211,7 @@ def plot_neural_heatmap(history, data_type="activations"):
         vmax=1,
         ax=ax,
         cbar_kws={"label": f"{data_type.capitalize()} Value"},
-        yticklabels=[f"N{i}" for i in range(4)],
+        yticklabels=[f"N{i}" for i in range(num_neurons)],
     )
 
     tick_positions = np.arange(0, steps_to_show, tick_step)
@@ -207,7 +229,7 @@ def plot_neural_heatmap(history, data_type="activations"):
 
 # =======================================================================
 
-network = NeuralNetwork()
+network = NeuralNetwork(num_neurons=16)
 steps = 256
 network.clear()
 network.set_output_identity()
@@ -221,9 +243,9 @@ network.randomize_weights()
 network.set_diagonal_weights(0)  # no self-feedback
 print(network.state.network_weights)
 
-network.state.thresholds = np.full((4,), 0.9)
+network.state.thresholds = np.full((network.state.num_neurons,), 0.9)
 
-network.enable_activation_leak(0.98)
+network.enable_activation_leak(0.97)
 network.enable_refraction_decay(5, 0.2)
 
 
@@ -232,9 +254,6 @@ history = {"activations": [], "firing": [], "outputs": [], "step": []}
 # input patterns
 stimulators = [
     [1, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0],
-    [0, 0, 0, 0],
 ]
 stimulator_strength = 0.25
 
@@ -255,5 +274,5 @@ for step in range(steps):
     history["step"].append(step)
 
 # Call the function to plot both heatmaps
-plot_neural_heatmap(history, "activations")
-plot_neural_heatmap(history, "firing")
+plot_neural_heatmap(history, "activations", network.state.num_neurons)
+plot_neural_heatmap(history, "firing", network.state.num_neurons)
