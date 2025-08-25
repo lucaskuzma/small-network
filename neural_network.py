@@ -315,3 +315,59 @@ for step in range(steps):
 plot_weight_heatmap(network.state.num_neurons)
 plot_neural_heatmap(history, "activations", network.state.num_neurons)
 plot_neural_heatmap(history, "firing", network.state.num_neurons)
+
+# %%
+
+import pygame
+import numpy as np
+import time
+
+
+def play_neural_outputs_live(history, tempo=120):
+    """Play neural network outputs as audio in real-time"""
+    pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
+    pygame.init()
+
+    # Map each neuron to a different frequency
+    base_freq = 220  # A3
+    freq_ratio = 2 ** (1 / 12)  # Semitone ratio
+
+    # Calculate time per step
+    step_duration = 60.0 / tempo / 4  # Assuming 16th notes
+
+    for step, outputs in enumerate(history["outputs"]):
+        # Mix all active neurons for this time step
+        mixed_audio = np.zeros(int(44100 * step_duration))
+
+        for neuron_idx, output_value in enumerate(outputs):
+            if output_value > 0.1:  # Threshold for activation
+                # Map neuron index to frequency (each neuron gets a different note)
+                frequency = base_freq * (freq_ratio ** (neuron_idx % 12))
+
+                # Generate sine wave for this neuron
+                t = np.linspace(0, step_duration, len(mixed_audio))
+                wave = np.sin(2 * np.pi * frequency * t) * output_value
+
+                # Add to mixed audio
+                mixed_audio += wave
+
+        # Normalize and convert to 16-bit audio
+        if np.max(np.abs(mixed_audio)) > 0:
+            mixed_audio = mixed_audio / np.max(np.abs(mixed_audio)) * 0.8
+        audio = (mixed_audio * 32767).astype(np.int16)
+
+        # Play the mixed audio for this time step
+        sound = pygame.sndarray.make_sound(audio)
+        sound.play()
+
+        time.sleep(step_duration)
+
+
+# Just add this to your existing code:
+play_neural_outputs_live(history, tempo=120)
+
+# %%
+
+import sys
+print(sys.executable)
+!{sys.executable} -m pip install pygame
