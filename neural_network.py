@@ -269,7 +269,7 @@ network.randomize_thresholds()
 network.set_diagonal_weights(0)  # no self-feedback
 
 network.enable_activation_leak(0.97)
-network.enable_refraction_decay(5, 0.5)
+network.enable_refraction_decay(3, 0.5)
 
 # input patterns
 stimulators = [
@@ -293,10 +293,11 @@ for step in range(steps):
 
 plot_weight_heatmap(network.state.num_neurons)
 plot_neural_heatmap(history, "activations", network.state.num_neurons)
-plot_neural_heatmap(history, "firing", network.state.num_neurons)
+# plot_neural_heatmap(history, "firing", network.state.num_neurons)
 plot_neural_heatmap(history, "outputs", network.state.num_neurons)
 
 # %%
+# each neuron gets a different frequency
 
 import pygame
 import numpy as np
@@ -345,8 +346,58 @@ def play_neural_outputs_live(history, tempo=120):
 
         time.sleep(step_duration)
 
+play_neural_outputs_live(history, tempo=120)
 
-# Just add this to your existing code:
+# %%
+# note number is neurons as 16 bit integer
+
+import pygame
+import numpy as np
+import time
+
+volume = 0.5
+
+
+def play_neural_outputs_live(history, tempo=120):
+    """Play neural network outputs as audio in real-time"""
+    pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
+    pygame.init()
+
+    # Map each neuron to a different frequency
+    base_freq = 110  # A2
+    freq_ratio = 2 ** (1 / 12)  # Semitone ratio
+
+    # Calculate time per step
+    step_duration = 60.0 / tempo / 4  # Assuming 16th notes
+
+    for step, outputs in enumerate(history["outputs"]):
+        wave = np.zeros(int(44100 * step_duration))
+
+        # make binary digits from outputs
+        binary_digits = list(map(lambda x: 1 if x > 0.9 else 0, outputs))
+
+        # convert binary digits to integer
+        note_number = int("".join(map(str, binary_digits)), 2)
+
+        if note_number > 0:
+            # map note number to frequency
+            frequency = base_freq * (freq_ratio ** (note_number % 24))
+
+            # generate sine wave
+            t = np.linspace(0, step_duration, len(wave))
+            wave = np.sin(2 * np.pi * frequency * t)
+
+            # fade out over duration
+            wave *= np.linspace(1, 0, len(t))
+
+        audio = (wave * 32767 * volume).astype(np.int16)
+
+        # play the wave for this time step
+        sound = pygame.sndarray.make_sound(audio)
+        sound.play()
+
+        time.sleep(step_duration)
+
 play_neural_outputs_live(history, tempo=120)
 
 # %%
