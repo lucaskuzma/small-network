@@ -342,11 +342,14 @@ def play_neural_outputs_live(history, tempo=120):
         for neuron_idx, output_value in enumerate(outputs):
             if output_value > 0.1:  # Threshold for activation
                 # Map neuron index to frequency (each neuron gets a different note)
-                frequency = base_freq * (freq_ratio ** (neuron_idx % 12))
+                frequency = base_freq * (freq_ratio ** ((neuron_idx * 5) % 36))
 
                 # Generate sine wave for this neuron
                 t = np.linspace(0, step_duration, len(mixed_audio))
                 wave = np.sin(2 * np.pi * frequency * t) * output_value
+
+                # fade out over duration
+                wave *= np.linspace(1, 0, len(t))
 
                 # Add to mixed audio
                 mixed_audio += wave
