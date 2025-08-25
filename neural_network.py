@@ -18,6 +18,7 @@ class NeuralNetworkState:
 
     use_activation_leak: bool = False
     activation_leak: float = 0.95
+    refraction_leak: float = 0.4
     use_refraction_decay: bool = False
     refraction_period: int = 3
     refractory_counters: np.ndarray = field(
@@ -46,16 +47,19 @@ class NeuralNetwork:
 
             new_activations[i] = np.clip(new_activations[i] + activation, 0, 1)
 
-            # Check if neuron should fire (only if not in refractory period)
-            if new_activations[i] >= self.state.thresholds[i] and (
-                not self.state.use_refraction_decay or new_refractory_counters[i] == 0
-            ):
+            if new_activations[i] >= self.state.thresholds[i]:
+
+                # fire!
                 new_firing[i] = True
-                # Set refractory counter if enabled
+
                 if self.state.use_refraction_decay:
                     new_refractory_counters[i] = self.state.refraction_period
                 else:
                     new_activations[i] = 0
+
+            if self.state.use_refraction_decay:
+                if new_refractory_counters[i] > 0:
+                    new_activations[i] *= self.state.refraction_leak
 
         # Calculate outputs based on firing neurons
         new_outputs = np.zeros(4)
@@ -126,7 +130,10 @@ class NeuralNetwork:
     def disable_activation_leak(self):
         self.state.use_activation_leak = False
 
-    def enable_refraction_decay(self, refraction_period: int = 3):
+    def enable_refraction_decay(
+        self, refraction_period: int = 3, refraction_leak: float = 0.4
+    ):
+        self.state.refraction_leak = np.clip(refraction_leak, 0, 1)
         self.state.use_refraction_decay = True
         self.state.refraction_period = max(1, refraction_period)
 
@@ -205,8 +212,8 @@ network.state.thresholds = np.full((4,), 0.75)
 
 network.set_output_identity()
 
-network.enable_activation_leak(0.9)
-network.enable_refraction_decay(3)
+network.enable_activation_leak(0.99)
+network.enable_refraction_decay(5, 0.7)
 
 
 history = {"activations": [], "firing": [], "outputs": [], "step": []}
@@ -214,7 +221,7 @@ history = {"activations": [], "firing": [], "outputs": [], "step": []}
 # input patterns
 stimulators = [
     [1, 0, 0, 0],
-    [0, 1, 0, 0, 0, 0],
+    [0, 1, 0, 0, 0, 0, 0, 0, 0],
     [0, 0, 0, 0],
     [0, 0, 0, 0],
 ]
