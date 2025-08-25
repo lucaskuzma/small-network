@@ -59,6 +59,7 @@ class NeuralNetwork:
                         # add weight from firing neuron j to current neuron i
                         incoming_activation += self.state.network_weights[j, i]
 
+                incoming_activation /= self.state.num_neurons
                 new_activations[i] = np.clip(
                     new_activations[i] + incoming_activation, 0, 1
                 )
