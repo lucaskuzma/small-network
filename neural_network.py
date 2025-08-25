@@ -146,7 +146,10 @@ class NeuralNetwork:
         self.state.network_weights = np.random.random((4, 4))
 
     def set_diagonal_weights(self, value: float):
-        self.state.network_weights = np.eye(4) * value
+        self.state.network_weights[0, 0] = value
+        self.state.network_weights[1, 1] = value
+        self.state.network_weights[2, 2] = value
+        self.state.network_weights[3, 3] = value
 
     def clear(self):
         self.state = NeuralNetworkState()
@@ -215,12 +218,13 @@ network.set_output_identity()
 # network.update_network_weight(3, 0, 0.5)  # N3 → N0 (feedback loop)
 
 network.randomize_weights()
-network.set_diagonal_weights(0)  # no feedback loop
+network.set_diagonal_weights(0)  # no self-feedback
+print(network.state.network_weights)
 
-network.state.thresholds = np.full((4,), 0.5)
+network.state.thresholds = np.full((4,), 0.9)
 
-# network.enable_activation_leak(0.99)
-# network.enable_refraction_decay(5, 0.3)
+network.enable_activation_leak(0.95)
+network.enable_refraction_decay(5, 0.2)
 
 
 history = {"activations": [], "firing": [], "outputs": [], "step": []}
@@ -228,7 +232,7 @@ history = {"activations": [], "firing": [], "outputs": [], "step": []}
 # input patterns
 stimulators = [
     [1, 0, 0, 0],
-    [0, 1, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
     [0, 0, 0, 0],
     [0, 0, 0, 0],
 ]
@@ -241,10 +245,10 @@ stimulator_strength = 0.2
 
 # Run simulation
 for step in range(steps):
+    network.tick()
     # network.manual_activate(0, 0.1)
     for i, pattern in enumerate(stimulators):
         network.manual_activate(i, pattern[step % len(pattern)] * stimulator_strength)
-    network.tick()
     history["activations"].append(network.state.activations.copy())
     history["firing"].append(network.state.firing.copy())
     history["outputs"].append(network.state.outputs.copy())
