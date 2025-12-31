@@ -17,12 +17,12 @@ class NeuralNetworkState:
     firing: np.ndarray = field(init=False)
     outputs: np.ndarray = field(init=False)
     refractory_counters: np.ndarray = field(init=False)
+    refraction_period: np.ndarray = field(init=False)
 
     use_activation_leak: bool = False
     activation_leak: float = 0.95
     refraction_leak: float = 0.4
     use_refraction_decay: bool = False
-    refraction_period: int = 3
     use_tanh_activation: bool = False
 
     def __post_init__(self):
@@ -80,7 +80,7 @@ class NeuralNetwork:
                     new_firing[i] = True
 
                     if self.state.use_refraction_decay:
-                        new_refractory_counters[i] = self.state.refraction_period
+                        new_refractory_counters[i] = self.state.refraction_period[i]
                     else:
                         new_activations[i] = 0
 
@@ -163,11 +163,22 @@ class NeuralNetwork:
         self.state.use_activation_leak = False
 
     def enable_refraction_decay(
-        self, refraction_period: int = 3, refraction_leak: float = 0.4
+        self,
+        refraction_period: int = 3,
+        refraction_leak: float = 0.4,
+        refraction_variation: int = 0,
     ):
         self.state.refraction_leak = np.clip(refraction_leak, 0, 1)
         self.state.use_refraction_decay = True
-        self.state.refraction_period = max(1, refraction_period)
+
+        # for each neuron, add a random variation to the refraction period
+        self.state.refraction_period = np.full(
+            self.state.num_neurons, refraction_period
+        )
+        if refraction_variation > 0:
+            self.state.refraction_period += np.random.randint(
+                0, refraction_variation, self.state.num_neurons
+            )
 
     def disable_refraction_decay(self):
         self.state.use_refraction_decay = False
@@ -303,7 +314,7 @@ def plot_neural_heatmap(history, data_type="activations", num_neurons=64):
 # =======================================================================
 
 network = NeuralNetwork(num_neurons=16)
-steps = 128
+steps = 256
 network.clear()
 network.set_output_identity()
 
@@ -314,7 +325,7 @@ network.randomize_thresholds()
 network.set_diagonal_weights(0)  # no self-feedback
 
 network.enable_activation_leak(0.97)
-network.enable_refraction_decay(3, 0.3)
+network.enable_refraction_decay(2, 0.25, 8)
 
 # network.state.network_weights[0, 1] = 0.9  # N0 → N1
 # network.state.network_weights[1, 2] = 0.9  # N1 → N2
