@@ -193,10 +193,15 @@ class NeuralNetwork:
         )
         self.state.network_weights *= mask
 
-    def randomize_output_weights(self):
-        self.state.output_weights = np.random.random(
-            (self.state.num_neurons, self.state.num_neurons)
+    def randomize_output_weights(self, sparsity=0.1, scale=0.3):
+        self.state.output_weights = (
+            np.random.random((self.state.num_neurons, self.state.num_neurons)) * scale
         )
+        mask = (
+            np.random.random((self.state.num_neurons, self.state.num_neurons))
+            < sparsity
+        )
+        self.state.output_weights *= mask
 
     def randomize_thresholds(self):
         self.state.thresholds = np.random.random(self.state.num_neurons)
@@ -321,7 +326,7 @@ network.set_output_identity()
 network.randomize_weights(sparsity=0.25, scale=0.5)
 # network.sinusoidal_weights()
 network.randomize_thresholds()
-# network.randomize_output_weights()
+network.randomize_output_weights()
 network.set_diagonal_weights(0)  # no self-feedback
 
 network.enable_activation_leak(0.97)
