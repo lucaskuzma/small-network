@@ -9,7 +9,7 @@ import seaborn as sns
 
 @dataclass
 class NeuralNetworkState:
-    num_neurons: int = 64
+    num_neurons: int = 16
     network_weights: np.ndarray = field(init=False)
     thresholds: np.ndarray = field(init=False)
     output_weights: np.ndarray = field(init=False)
@@ -61,7 +61,7 @@ class NeuralNetwork:
                         incoming_activation += self.state.network_weights[j, i]
 
                 # normalize incoming activation
-                incoming_activation /= self.state.num_neurons
+                # incoming_activation /= self.state.num_neurons
 
                 # clip or saturate activation
                 if self.state.use_tanh_activation:
@@ -84,8 +84,12 @@ class NeuralNetwork:
                     else:
                         new_activations[i] = 0
 
+            # if self.state.use_refraction_decay:
+            #     if new_refractory_counters[i] > 0:
+            #         new_activations[i] *= self.state.refraction_leak
+
             if self.state.use_refraction_decay:
-                if new_refractory_counters[i] > 0:
+                if self.state.refractory_counters[i] > 0:  # Check OLD counter, not new!
                     new_activations[i] *= self.state.refraction_leak
 
         # Calculate outputs based on firing neurons
@@ -213,9 +217,23 @@ def plot_weight_heatmap(num_neurons=64):
         yticklabels=[f"N{i}" for i in range(num_neurons)],
     )
 
+    ax.set_title(f"Weight Heatmap")
+
     plt.tight_layout()
     plt.show()
 
+# =======================================================================
+def plot_threshold_heatmap(num_neurons=64):
+    data_matrix = np.array(network.state.thresholds).reshape(-1, 1)
+
+    fig, ax = plt.subplots(figsize=(16, 8))
+
+    sns.heatmap(data_matrix, annot=False, cmap="viridis", vmin=0, vmax=1, ax=ax, yticklabels=[f"N{i}" for i in range(num_neurons)])
+
+    ax.set_title(f"Threshold Heatmap")
+
+    plt.tight_layout()
+    plt.show()
 
 # =======================================================================
 def plot_neural_heatmap(history, data_type="activations", num_neurons=64):
@@ -244,7 +262,7 @@ def plot_neural_heatmap(history, data_type="activations", num_neurons=64):
 
     ax.set_xlabel("Time Step")
     ax.set_ylabel("Neuron")
-    ax.set_title(f"Neural Network {data_type.capitalize()} Over Time")
+    ax.set_title(f"{data_type.capitalize()} Over Time")
 
     plt.tight_layout()
     plt.show()
@@ -253,14 +271,9 @@ def plot_neural_heatmap(history, data_type="activations", num_neurons=64):
 # =======================================================================
 
 network = NeuralNetwork(num_neurons=16)
-steps = 256
+steps = 64
 network.clear()
 network.set_output_identity()
-
-# network.update_network_weight(0, 1, 0.5)  # N0 → N1
-# network.update_network_weight(1, 2, 0.5)  # N1 → N2
-# network.update_network_weight(2, 3, 0.5)  # N2 → N3
-# network.update_network_weight(3, 0, 0.5)  # N3 → N0 (feedback loop)
 
 network.randomize_weights()
 # network.sinusoidal_weights()
@@ -269,21 +282,27 @@ network.randomize_thresholds()
 network.set_diagonal_weights(0)  # no self-feedback
 
 network.enable_activation_leak(0.97)
-network.enable_refraction_decay(3, 0.5)
+network.enable_refraction_decay(3, 0.3)
+
+# network.state.network_weights[0, 1] = 0.9  # N0 → N1
+# network.state.network_weights[1, 2] = 0.9  # N1 → N2
+# network.state.network_weights[2, 3] = 0.9  # N2 → N3
+# network.state.network_weights[3, 0] = 0.9  # N3 → N0 (feedback loop)
+
 
 # input patterns
-stimulators = [
-    [1, 0, 0, 0, 0, 0, 0, 0],
-]
-stimulator_strength = 0.25
+# stimulators = [
+#     [1, 0, 0, 0, 0, 0, 0, 0],
+# ]
+# stimulator_strength = 0.0
 
 history = {"activations": [], "firing": [], "outputs": [], "step": []}
 
 # run simulation
+network.manual_activate(0, 1.0)
 for step in range(steps):
-    # network.manual_activate(0, 0.1)
-    for i, pattern in enumerate(stimulators):
-        network.manual_activate(i, pattern[step % len(pattern)] * stimulator_strength)
+    # for i, pattern in enumerate(stimulators):
+    #     network.manual_activate(i, pattern[step % len(pattern)] * stimulator_strength)
     network.tick()
     history["activations"].append(network.state.activations.copy())
     history["firing"].append(network.state.firing.copy())
@@ -292,6 +311,7 @@ for step in range(steps):
 
 
 plot_weight_heatmap(network.state.num_neurons)
+plot_threshold_heatmap(network.state.num_neurons)
 plot_neural_heatmap(history, "activations", network.state.num_neurons)
 # plot_neural_heatmap(history, "firing", network.state.num_neurons)
 plot_neural_heatmap(history, "outputs", network.state.num_neurons)
