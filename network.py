@@ -6,7 +6,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-
 @dataclass
 class NeuralNetworkState:
     num_neurons: int = 16
@@ -155,10 +154,13 @@ class NeuralNetwork:
     def disable_refraction_decay(self):
         self.state.use_refraction_decay = False
 
-    def randomize_weights(self):
+    def randomize_weights(self, sparsity=0.25, scale=0.5):
         self.state.network_weights = np.random.random(
             (self.state.num_neurons, self.state.num_neurons)
-        )
+        ) * scale
+        mask = np.random.random((self.state.num_neurons, self.state.num_neurons)) < sparsity
+        self.state.network_weights *= mask
+
 
     def randomize_output_weights(self):
         self.state.output_weights = np.random.random(
@@ -271,11 +273,11 @@ def plot_neural_heatmap(history, data_type="activations", num_neurons=64):
 # =======================================================================
 
 network = NeuralNetwork(num_neurons=16)
-steps = 64
+steps = 128
 network.clear()
 network.set_output_identity()
 
-network.randomize_weights()
+network.randomize_weights(sparsity=0.25, scale=0.5)
 # network.sinusoidal_weights()
 network.randomize_thresholds()
 # network.randomize_output_weights()
