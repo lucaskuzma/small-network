@@ -330,7 +330,7 @@ network.randomize_output_weights()
 network.set_diagonal_weights(0)  # no self-feedback
 
 network.enable_activation_leak(0.97)
-network.enable_refraction_decay(2, 0.25, 8)
+network.enable_refraction_decay(2, 0.75, 8)
 
 # network.state.network_weights[0, 1] = 0.9  # N0 → N1
 # network.state.network_weights[1, 2] = 0.9  # N1 → N2
