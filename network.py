@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+
 @dataclass
 class NeuralNetworkState:
     num_neurons: int = 16
@@ -132,6 +133,23 @@ class NeuralNetwork:
             self.state.activations[neuron_index], 0, 1
         )
 
+    def manual_activate_most_weighted(self, value: float):
+        """Activate the neuron with the highest total network weight (impact on other neurons)."""
+        # Calculate total network weight for each neuron (sum of all outgoing connections)
+        total_network_weights = np.sum(self.state.network_weights, axis=1)
+
+        # Find neuron with highest total network weight
+        most_weighted_neuron = np.argmax(total_network_weights)
+
+        print(
+            f"Most weighted neuron: {most_weighted_neuron} (total weight: {total_network_weights[most_weighted_neuron]:.3f})"
+        )
+
+        # Activate that neuron
+        self.manual_activate(most_weighted_neuron, value)
+
+        return most_weighted_neuron
+
     def clear_firing(self):
         """Clear all firing states and outputs."""
         self.state.firing = np.zeros(self.state.num_neurons, dtype=bool)
@@ -155,12 +173,14 @@ class NeuralNetwork:
         self.state.use_refraction_decay = False
 
     def randomize_weights(self, sparsity=0.25, scale=0.5):
-        self.state.network_weights = np.random.random(
-            (self.state.num_neurons, self.state.num_neurons)
-        ) * scale
-        mask = np.random.random((self.state.num_neurons, self.state.num_neurons)) < sparsity
+        self.state.network_weights = (
+            np.random.random((self.state.num_neurons, self.state.num_neurons)) * scale
+        )
+        mask = (
+            np.random.random((self.state.num_neurons, self.state.num_neurons))
+            < sparsity
+        )
         self.state.network_weights *= mask
-
 
     def randomize_output_weights(self):
         self.state.output_weights = np.random.random(
@@ -224,18 +244,28 @@ def plot_weight_heatmap(num_neurons=64):
     plt.tight_layout()
     plt.show()
 
+
 # =======================================================================
 def plot_threshold_heatmap(num_neurons=64):
     data_matrix = np.array(network.state.thresholds).reshape(-1, 1)
 
     fig, ax = plt.subplots(figsize=(16, 8))
 
-    sns.heatmap(data_matrix, annot=False, cmap="viridis", vmin=0, vmax=1, ax=ax, yticklabels=[f"N{i}" for i in range(num_neurons)])
+    sns.heatmap(
+        data_matrix,
+        annot=False,
+        cmap="viridis",
+        vmin=0,
+        vmax=1,
+        ax=ax,
+        yticklabels=[f"N{i}" for i in range(num_neurons)],
+    )
 
     ax.set_title(f"Threshold Heatmap")
 
     plt.tight_layout()
     plt.show()
+
 
 # =======================================================================
 def plot_neural_heatmap(history, data_type="activations", num_neurons=64):
@@ -301,7 +331,7 @@ network.enable_refraction_decay(3, 0.3)
 history = {"activations": [], "firing": [], "outputs": [], "step": []}
 
 # run simulation
-network.manual_activate(0, 1.0)
+network.manual_activate_most_weighted(1.0)
 for step in range(steps):
     # for i, pattern in enumerate(stimulators):
     #     network.manual_activate(i, pattern[step % len(pattern)] * stimulator_strength)
@@ -368,6 +398,7 @@ def play_neural_outputs_live(history, tempo=120):
 
         time.sleep(step_duration)
 
+
 play_neural_outputs_live(history, tempo=120)
 
 # %%
@@ -420,10 +451,11 @@ def play_neural_outputs_live(history, tempo=120):
 
         time.sleep(step_duration)
 
+
 play_neural_outputs_live(history, tempo=120)
 
 # %%
 
-import sys
-print(sys.executable)
-!{sys.executable} -m pip install pygame
+# import sys
+# print(sys.executable)
+# !{sys.executable} -m pip install pygame
