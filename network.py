@@ -306,28 +306,6 @@ def plot_weight_heatmap(num_neurons=64):
 
 
 # =======================================================================
-def plot_threshold_heatmap(num_neurons=64):
-    data_matrix = np.array(network.state.thresholds).reshape(-1, 1)
-
-    fig, ax = plt.subplots(figsize=(16, 8))
-
-    sns.heatmap(
-        data_matrix,
-        annot=False,
-        cmap="viridis",
-        vmin=0,
-        vmax=1,
-        ax=ax,
-        yticklabels=[f"N{i}" for i in range(num_neurons)],
-    )
-
-    ax.set_title(f"Threshold Heatmap")
-
-    plt.tight_layout()
-    plt.show()
-
-
-# =======================================================================
 def plot_neural_heatmap(history, data_type="activations", num_neurons=64):
     steps_to_show = len(history.get("step", []))
     tick_step = steps_to_show // 16
@@ -390,7 +368,7 @@ network.randomize_threshold_variations(range=0.1, period=16)
 # ]
 # stimulator_strength = 0.0
 
-history = {"activations": [], "firing": [], "outputs": [], "step": []}
+history = {"activations": [], "firing": [], "outputs": [], "thresholds": [], "step": []}
 
 # run simulation
 network.manual_activate_most_weighted(1.0)
@@ -401,11 +379,12 @@ for step in range(steps):
     history["activations"].append(network.state.activations.copy())
     history["firing"].append(network.state.firing.copy())
     history["outputs"].append(network.state.outputs.copy())
+    history["thresholds"].append(network.state.thresholds_current.copy())
     history["step"].append(step)
 
 
 plot_weight_heatmap(network.state.num_neurons)
-plot_threshold_heatmap(network.state.num_neurons)
+plot_neural_heatmap(history, "thresholds", network.state.num_neurons)
 plot_neural_heatmap(history, "activations", network.state.num_neurons)
 # plot_neural_heatmap(history, "firing", network.state.num_neurons)
 plot_neural_heatmap(history, "outputs", network.state.num_outputs)
