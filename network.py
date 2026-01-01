@@ -415,6 +415,364 @@ plot_neural_heatmap(history, "activations", network.state.num_neurons)
 # plot_neural_heatmap(history, "firing", network.state.num_neurons)
 plot_neural_heatmap(history, "outputs", network.state.num_outputs)
 
+# =======================================================================
+# Calculate synchronization from activation history (CTM-inspired)
+# S^t = Z^t · (Z^t)^T where Z^t is the history of activations up to time t
+
+
+def compute_synchronization_over_time(history, data_type="activations"):
+    """
+    Compute synchronization matrix at each time step.
+    Returns a list of (D×D) synchronization matrices, one per time step.
+    """
+    activations = np.array(history[data_type])  # (T, D)
+    T, D = activations.shape
+
+    sync_matrices = []
+    for t in range(1, T + 1):
+        Z_t = activations[:t, :].T  # (D, t) - history up to time t
+        S_t = Z_t @ Z_t.T  # (D, D) - synchronization matrix
+        sync_matrices.append(S_t)
+
+    return sync_matrices
+
+
+def plot_synchronization_matrix(
+    sync_matrix, title="Neural Synchronization", num_neurons=64
+):
+    """Plot a single synchronization matrix as a heatmap."""
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    # Normalize for visualization
+    max_val = np.max(np.abs(sync_matrix))
+    if max_val > 0:
+        normalized = sync_matrix / max_val
+    else:
+        normalized = sync_matrix
+
+    sns.heatmap(
+        normalized,
+        annot=False,
+        cmap="magma",
+        vmin=0,
+        vmax=1,
+        ax=ax,
+        cbar_kws={"label": "Synchronization (normalized)"},
+        xticklabels=(
+            [f"N{i}" for i in range(num_neurons)] if num_neurons <= 16 else False
+        ),
+        yticklabels=(
+            [f"N{i}" for i in range(num_neurons)] if num_neurons <= 16 else False
+        ),
+    )
+
+    ax.set_xlabel("Neuron")
+    ax.set_ylabel("Neuron")
+    ax.set_title(title)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_synchronization_evolution(sync_matrices, sample_steps=8, num_neurons=64):
+    """Plot synchronization matrices at several time points to show evolution."""
+    T = len(sync_matrices)
+    step_indices = np.linspace(0, T - 1, sample_steps, dtype=int)
+
+    fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+    axes = axes.flatten()
+
+    for idx, (ax, step) in enumerate(zip(axes, step_indices)):
+        S = sync_matrices[step]
+        max_val = np.max(np.abs(S))
+        normalized = S / max_val if max_val > 0 else S
+
+        im = ax.imshow(normalized, cmap="magma", vmin=0, vmax=1, aspect="auto")
+        ax.set_title(f"t={step + 1}")
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    fig.suptitle("Synchronization Matrix Evolution Over Time", fontsize=14)
+    fig.colorbar(im, ax=axes, shrink=0.6, label="Sync (normalized)")
+    # plt.tight_layout()  # not compatible
+    plt.show()
+
+
+def plot_pairwise_sync_over_time(sync_matrices, neuron_pairs=None, num_neurons=64):
+    """
+    Plot how synchronization between specific neuron pairs evolves over time.
+    If no pairs specified, picks the top synchronized pairs from final state.
+    """
+    T = len(sync_matrices)
+    final_sync = sync_matrices[-1]
+
+    if neuron_pairs is None:
+        # Find top 5 most synchronized pairs (excluding diagonal)
+        sync_copy = final_sync.copy()
+        np.fill_diagonal(sync_copy, 0)
+        flat_indices = np.argsort(sync_copy.flatten())[::-1][:5]
+        neuron_pairs = [np.unravel_index(idx, final_sync.shape) for idx in flat_indices]
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    for i, j in neuron_pairs:
+        if i >= j:  # Skip duplicates and self-pairs
+            continue
+        sync_over_time = [sync_matrices[t][i, j] for t in range(T)]
+        ax.plot(sync_over_time, label=f"N{i} ↔ N{j}", alpha=0.8)
+
+    ax.set_xlabel("Time Step")
+    ax.set_ylabel("Synchronization (unnormalized)")
+    ax.set_title("Pairwise Synchronization Over Time")
+    ax.legend(loc="upper left")
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def cluster_neurons_by_sync(sync_matrix, n_clusters=4, method="ward"):
+    """
+    Cluster neurons based on their synchronization patterns using hierarchical clustering.
+
+    Args:
+        sync_matrix: (D, D) synchronization matrix
+        n_clusters: number of clusters to form
+        method: linkage method ('ward', 'complete', 'average', 'single')
+
+    Returns:
+        cluster_labels: array of cluster assignments for each neuron
+        linkage_matrix: hierarchical clustering linkage matrix
+    """
+    from scipy.cluster.hierarchy import linkage, fcluster, dendrogram
+    from scipy.spatial.distance import squareform
+
+    # Convert similarity to distance (higher sync = lower distance)
+    # Normalize first
+    max_val = np.max(sync_matrix)
+    if max_val > 0:
+        normalized = sync_matrix / max_val
+    else:
+        normalized = sync_matrix
+
+    # Distance = 1 - similarity (works because normalized is in [0,1])
+    distance_matrix = 1 - normalized
+    np.fill_diagonal(distance_matrix, 0)  # Self-distance is 0
+
+    # Make symmetric and convert to condensed form for scipy
+    distance_matrix = (distance_matrix + distance_matrix.T) / 2
+    condensed = squareform(distance_matrix)
+
+    # Hierarchical clustering
+    linkage_matrix = linkage(condensed, method=method)
+    cluster_labels = fcluster(linkage_matrix, n_clusters, criterion="maxclust")
+
+    return cluster_labels, linkage_matrix
+
+
+def plot_sync_dendrogram(linkage_matrix, cluster_labels, num_neurons=64):
+    """Plot dendrogram showing hierarchical clustering of neurons."""
+    from scipy.cluster.hierarchy import dendrogram
+
+    fig, ax = plt.subplots(figsize=(14, 6))
+
+    # Color threshold to match n_clusters
+    n_clusters = len(np.unique(cluster_labels))
+    color_threshold = linkage_matrix[-(n_clusters - 1), 2] if n_clusters > 1 else 0
+
+    dendrogram(
+        linkage_matrix,
+        ax=ax,
+        labels=[f"N{i}" for i in range(num_neurons)],
+        leaf_rotation=90,
+        leaf_font_size=8 if num_neurons <= 32 else 6,
+        color_threshold=color_threshold,
+    )
+
+    ax.set_xlabel("Neuron")
+    ax.set_ylabel("Distance (1 - sync)")
+    ax.set_title("Hierarchical Clustering of Neurons by Synchronization")
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_clustered_sync_matrix(sync_matrix, cluster_labels, num_neurons=64):
+    """Plot synchronization matrix reordered by cluster membership."""
+    # Sort neurons by cluster
+    sorted_indices = np.argsort(cluster_labels)
+    reordered = sync_matrix[sorted_indices][:, sorted_indices]
+    sorted_labels = cluster_labels[sorted_indices]
+
+    # Normalize for visualization
+    max_val = np.max(reordered)
+    if max_val > 0:
+        reordered = reordered / max_val
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    im = ax.imshow(reordered, cmap="magma", vmin=0, vmax=1, aspect="auto")
+
+    # Draw cluster boundaries
+    unique_clusters = np.unique(sorted_labels)
+    boundaries = []
+    for c in unique_clusters[:-1]:
+        boundary = np.where(sorted_labels == c)[0][-1] + 0.5
+        boundaries.append(boundary)
+        ax.axhline(y=boundary, color="white", linewidth=2, linestyle="--")
+        ax.axvline(x=boundary, color="white", linewidth=2, linestyle="--")
+
+    ax.set_xlabel("Neuron (sorted by cluster)")
+    ax.set_ylabel("Neuron (sorted by cluster)")
+    ax.set_title(
+        f"Synchronization Matrix (neurons grouped into {len(unique_clusters)} clusters)"
+    )
+
+    plt.colorbar(im, ax=ax, label="Sync (normalized)")
+    plt.tight_layout()
+    plt.show()
+
+    return sorted_indices
+
+
+def get_cluster_members(cluster_labels, n_clusters=None):
+    """Return a dict mapping cluster ID to list of neuron indices."""
+    if n_clusters is None:
+        n_clusters = len(np.unique(cluster_labels))
+
+    clusters = {}
+    for cluster_id in range(1, n_clusters + 1):
+        members = np.where(cluster_labels == cluster_id)[0]
+        clusters[cluster_id] = members.tolist()
+
+    return clusters
+
+
+def plot_cluster_activations(history, clusters, data_type="activations"):
+    """
+    Plot activations over time for each cluster.
+    Shows individual neuron traces (faded) and cluster mean (bold).
+
+    Args:
+        history: dict with 'activations' key containing (T, D) data
+        clusters: dict mapping cluster_id to list of neuron indices
+    """
+    activations = np.array(history[data_type])  # (T, D)
+    T = activations.shape[0]
+    time_steps = np.arange(T)
+
+    n_clusters = len(clusters)
+
+    # Use a nice color palette
+    colors = plt.cm.tab10(np.linspace(0, 1, max(10, n_clusters)))
+
+    # Calculate grid dimensions
+    cols = min(3, n_clusters)
+    rows = (n_clusters + cols - 1) // cols
+
+    fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 4 * rows), squeeze=False)
+    axes = axes.flatten()
+
+    for idx, (cluster_id, members) in enumerate(clusters.items()):
+        ax = axes[idx]
+        color = colors[idx % len(colors)]
+
+        if len(members) == 0:
+            ax.set_visible(False)
+            continue
+
+        # Get activations for this cluster's neurons
+        cluster_activations = activations[:, members]  # (T, n_members)
+
+        # Plot individual neuron traces (faded)
+        for i, neuron_idx in enumerate(members):
+            ax.plot(
+                time_steps,
+                cluster_activations[:, i],
+                color=color,
+                alpha=0.15,
+                linewidth=0.8,
+            )
+
+        # Plot cluster mean (bold)
+        cluster_mean = np.mean(cluster_activations, axis=1)
+        ax.plot(
+            time_steps,
+            cluster_mean,
+            color=color,
+            linewidth=2.5,
+            label=f"Mean (n={len(members)})",
+        )
+
+        # Plot ±1 std as shaded region
+        cluster_std = np.std(cluster_activations, axis=1)
+        ax.fill_between(
+            time_steps,
+            cluster_mean - cluster_std,
+            cluster_mean + cluster_std,
+            color=color,
+            alpha=0.2,
+        )
+
+        ax.set_xlabel("Time Step")
+        ax.set_ylabel("Activation")
+        ax.set_title(f"Cluster {cluster_id} ({len(members)} neurons)")
+        ax.legend(loc="upper right", fontsize=8)
+        ax.set_ylim(-0.05, 1.05)
+        ax.grid(True, alpha=0.3)
+
+    # Hide unused axes
+    for idx in range(n_clusters, len(axes)):
+        axes[idx].set_visible(False)
+
+    fig.suptitle("Cluster Activations Over Time", fontsize=14, y=1.02)
+    plt.tight_layout()
+    plt.show()
+
+
+# Compute synchronization from activation history
+sync_matrices = compute_synchronization_over_time(history, "activations")
+
+# Plot final synchronization matrix
+plot_synchronization_matrix(
+    sync_matrices[-1],
+    title=f"Final Synchronization Matrix (t={len(sync_matrices)})",
+    num_neurons=network.state.num_neurons,
+)
+
+# Plot evolution of synchronization over time
+plot_synchronization_evolution(
+    sync_matrices, sample_steps=8, num_neurons=network.state.num_neurons
+)
+
+# Plot pairwise synchronization for top synchronized neuron pairs
+plot_pairwise_sync_over_time(sync_matrices, num_neurons=network.state.num_neurons)
+
+# Cluster neurons by synchronization patterns
+n_clusters = 8  # Adjust this to change number of clusters
+cluster_labels, linkage_matrix = cluster_neurons_by_sync(
+    sync_matrices[-1], n_clusters=n_clusters
+)
+
+# Show dendrogram
+plot_sync_dendrogram(
+    linkage_matrix, cluster_labels, num_neurons=network.state.num_neurons
+)
+
+# Show reordered sync matrix with cluster boundaries
+sorted_indices = plot_clustered_sync_matrix(
+    sync_matrices[-1], cluster_labels, num_neurons=network.state.num_neurons
+)
+
+# Print cluster membership
+clusters = get_cluster_members(cluster_labels)
+print("\n=== Neuron Clusters by Synchronization ===")
+for cluster_id, members in clusters.items():
+    print(f"Cluster {cluster_id}: {len(members)} neurons → {members}")
+
+# Plot activations for each cluster
+plot_cluster_activations(history, clusters, data_type="activations")
+
 # %%
 # each neuron gets a different frequency
 
@@ -540,3 +898,5 @@ play_neural_outputs_live(history, tempo=90)
 # import sys
 # print(sys.executable)
 # !{sys.executable} -m pip install pygame
+
+# !pip install "scipy>=1.7.0"
