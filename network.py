@@ -382,7 +382,7 @@ plot_weight_heatmap(network.state.num_neurons)
 plot_threshold_heatmap(network.state.num_neurons)
 plot_neural_heatmap(history, "activations", network.state.num_neurons)
 # plot_neural_heatmap(history, "firing", network.state.num_neurons)
-plot_neural_heatmap(history, "outputs", network.state.num_neurons)
+plot_neural_heatmap(history, "outputs", network.state.num_outputs)
 
 # %%
 # each neuron gets a different frequency
