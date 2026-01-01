@@ -389,7 +389,7 @@ def play_neural_outputs_live(history, tempo=120):
         mixed_audio = np.zeros(int(44100 * step_duration))
 
         for neuron_idx, output_value in enumerate(outputs):
-            if output_value > 0.9:  # Threshold for activation
+            if output_value > 0.3:  # Threshold for activation
                 # Map neuron index to frequency (each neuron gets a different note)
                 frequency = base_freq * (freq_ratio ** ((neuron_idx * 5) % 36))
 
