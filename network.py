@@ -211,15 +211,31 @@ class NeuralNetwork:
     def disable_refraction_decay(self):
         self.state.use_refraction_decay = False
 
-    def randomize_weights(self, sparsity=0.25, scale=0.5):
-        self.state.network_weights = (
-            np.random.random((self.state.num_neurons, self.state.num_neurons)) * scale
+    def randomize_weights(self, sparsity=0.25, scale=0.4):
+        """Randomize weights with gaussian distribution centered at 0, clipped to [-1, 1].
+
+        Args:
+            sparsity: Fraction of connections that exist (0-1)
+            scale: Standard deviation of the gaussian distribution
+        """
+        # Gaussian distribution centered at 0, clipped to [-1, 1]
+        self.state.network_weights = np.clip(
+            np.random.randn(self.state.num_neurons, self.state.num_neurons) * scale,
+            -1,
+            1,
         )
+
+        # Apply sparsity mask
         mask = (
             np.random.random((self.state.num_neurons, self.state.num_neurons))
             < sparsity
         )
         self.state.network_weights *= mask
+
+    def get_spectral_radius(self) -> float:
+        """Calculate the spectral radius (largest absolute eigenvalue) of the weight matrix."""
+        eigenvalues = np.linalg.eigvals(self.state.network_weights)
+        return np.max(np.abs(eigenvalues))
 
     def randomize_output_weights(self, sparsity=0.1, scale=0.3):
         self.state.output_weights = (
@@ -239,9 +255,12 @@ class NeuralNetwork:
         self.state.threshold_variation_ranges = (
             np.random.random(self.state.num_neurons) * range
         )
-        self.state.threshold_variation_periods = np.random.randint(
-            0, period, self.state.num_neurons
-        )
+        if period > 0:
+            self.state.threshold_variation_periods = np.random.randint(
+                0, period, self.state.num_neurons
+            )
+        else:
+            self.state.threshold_variation_periods = np.full(self.state.num_neurons, 0)
 
     def sinusoidal_weights(self):
         for i in range(self.state.num_neurons):
@@ -286,20 +305,24 @@ class NeuralNetwork:
 def plot_weight_heatmap(num_neurons=64):
     data_matrix = np.array(network.state.network_weights)
 
+    # Calculate symmetric range centered at 0
+    max_abs = max(abs(data_matrix.min()), abs(data_matrix.max()))
+
     fig, ax = plt.subplots(figsize=(16, 8))
 
     sns.heatmap(
         data_matrix.T,
         annot=False,
-        cmap="viridis",
-        vmin=0,
-        vmax=1,
+        cmap="RdBu",  # Diverging colormap: red=negative, blue=positive
+        vmin=-max_abs,
+        vmax=max_abs,
+        center=0,
         ax=ax,
-        cbar_kws={"label": f"Weight Value"},
+        cbar_kws={"label": "Weight Value"},
         yticklabels=[f"N{i}" for i in range(num_neurons)],
     )
 
-    ax.set_title(f"Weight Heatmap")
+    ax.set_title("Weight Heatmap (Red=Inhibitory, Blue=Excitatory)")
 
     plt.tight_layout()
     plt.show()
@@ -345,16 +368,19 @@ steps = 256
 network.clear()
 network.set_output_identity()
 
-network.randomize_weights(sparsity=0.1, scale=0.5)
+network.randomize_weights(sparsity=0.1, scale=0.4)
 network.randomize_output_weights(sparsity=0.1, scale=0.2)
 # network.sinusoidal_weights()
 network.randomize_thresholds()
 network.set_diagonal_weights(0)  # no self-feedback
 
+# Print spectral radius to see network dynamics regime
+print(f"Spectral radius: {network.get_spectral_radius():.3f}")
+
 network.enable_activation_leak(0.97)
 network.enable_refraction_decay(2, 0.75, 8)
 
-network.randomize_threshold_variations(range=0.3, period=32)
+network.randomize_threshold_variations(range=0.0, period=0)
 
 # network.state.network_weights[0, 1] = 0.9  # N0 → N1
 # network.state.network_weights[1, 2] = 0.9  # N1 → N2
