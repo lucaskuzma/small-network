@@ -354,7 +354,7 @@ network.set_diagonal_weights(0)  # no self-feedback
 network.enable_activation_leak(0.97)
 network.enable_refraction_decay(2, 0.75, 8)
 
-network.randomize_threshold_variations(range=0.1, period=16)
+network.randomize_threshold_variations(range=0.3, period=32)
 
 # network.state.network_weights[0, 1] = 0.9  # N0 → N1
 # network.state.network_weights[1, 2] = 0.9  # N1 → N2
