@@ -13,6 +13,9 @@ class NeuralNetworkState:
     num_outputs: int = 16
     network_weights: np.ndarray = field(init=False)
     thresholds: np.ndarray = field(init=False)
+    thresholds_current: np.ndarray = field(init=False)
+    threshold_variation_ranges: np.ndarray = field(init=False)
+    threshold_variation_periods: np.ndarray = field(init=False)
     output_weights: np.ndarray = field(init=False)
     activations: np.ndarray = field(init=False)
     firing: np.ndarray = field(init=False)
@@ -29,6 +32,9 @@ class NeuralNetworkState:
     def __post_init__(self):
         self.network_weights = np.zeros((self.num_neurons, self.num_neurons))
         self.thresholds = np.full((self.num_neurons,), 0.5)
+        self.thresholds_current = np.full((self.num_neurons,), 0.5)
+        self.threshold_variation_ranges = np.full((self.num_neurons,), 0)
+        self.threshold_variation_periods = np.full((self.num_neurons,), 0)
         # Output weights map from num_neurons to num_outputs
         self.output_weights = np.zeros((self.num_neurons, self.num_outputs))
         # Initialize with identity-like mapping for neurons that have corresponding outputs
@@ -57,7 +63,7 @@ class NeuralNetwork:
         else:
             self.state = initial_state
 
-    def tick(self):
+    def tick(self, step: int):
         # Calculate new activations from current firing neurons
         new_activations = self.state.activations.copy()
         new_firing = np.zeros(self.state.num_neurons, dtype=bool)
@@ -87,7 +93,7 @@ class NeuralNetwork:
                     )
 
                 # check if neuron should fire
-                if new_activations[i] >= self.state.thresholds[i]:
+                if new_activations[i] >= self.state.thresholds_current[i]:
 
                     # fire!
                     new_firing[i] = True
@@ -104,6 +110,15 @@ class NeuralNetwork:
             if self.state.use_refraction_decay:
                 if self.state.refractory_counters[i] > 0:  # Check OLD counter, not new!
                     new_activations[i] *= self.state.refraction_leak
+
+            if self.state.threshold_variation_periods[i] > 0:
+                self.state.thresholds_current[i] = (
+                    np.sin(step * 2 * np.pi / self.state.threshold_variation_periods[i])
+                    * self.state.threshold_variation_ranges[i]
+                ) + self.state.thresholds[i]
+                self.state.thresholds_current[i] = np.clip(
+                    self.state.thresholds_current[i], 0, 1
+                )
 
         # Calculate outputs based on firing neurons
         new_outputs = self.state.outputs.copy()
@@ -218,6 +233,15 @@ class NeuralNetwork:
 
     def randomize_thresholds(self):
         self.state.thresholds = np.random.random(self.state.num_neurons)
+        self.state.thresholds_current = self.state.thresholds.copy()
+
+    def randomize_threshold_variations(self, range=0.1, period=8):
+        self.state.threshold_variation_ranges = (
+            np.random.random(self.state.num_neurons) * range
+        )
+        self.state.threshold_variation_periods = np.random.randint(
+            0, period, self.state.num_neurons
+        )
 
     def sinusoidal_weights(self):
         for i in range(self.state.num_neurons):
@@ -338,19 +362,21 @@ def plot_neural_heatmap(history, data_type="activations", num_neurons=64):
 
 # =======================================================================
 
-network = NeuralNetwork(num_neurons=16, num_outputs=8)
+network = NeuralNetwork(num_neurons=64, num_outputs=8)
 steps = 256
 network.clear()
 network.set_output_identity()
 
-network.randomize_weights(sparsity=0.25, scale=0.5)
+network.randomize_weights(sparsity=0.1, scale=0.5)
+network.randomize_output_weights(sparsity=0.1, scale=0.2)
 # network.sinusoidal_weights()
 network.randomize_thresholds()
-network.randomize_output_weights()
 network.set_diagonal_weights(0)  # no self-feedback
 
 network.enable_activation_leak(0.97)
 network.enable_refraction_decay(2, 0.75, 8)
+
+network.randomize_threshold_variations(range=0.1, period=16)
 
 # network.state.network_weights[0, 1] = 0.9  # N0 → N1
 # network.state.network_weights[1, 2] = 0.9  # N1 → N2
@@ -371,7 +397,7 @@ network.manual_activate_most_weighted(1.0)
 for step in range(steps):
     # for i, pattern in enumerate(stimulators):
     #     network.manual_activate(i, pattern[step % len(pattern)] * stimulator_strength)
-    network.tick()
+    network.tick(step)
     history["activations"].append(network.state.activations.copy())
     history["firing"].append(network.state.firing.copy())
     history["outputs"].append(network.state.outputs.copy())
@@ -409,7 +435,7 @@ def play_neural_outputs_live(history, tempo=120):
         mixed_audio = np.zeros(int(44100 * step_duration))
 
         for neuron_idx, output_value in enumerate(outputs):
-            if output_value > 0.3:  # Threshold for activation
+            if output_value > 0.8:  # Threshold for activation
                 # Map neuron index to frequency (each neuron gets a different note)
                 frequency = base_freq * (freq_ratio ** ((neuron_idx * 5) % 36))
 
@@ -435,7 +461,7 @@ def play_neural_outputs_live(history, tempo=120):
         time.sleep(step_duration)
 
 
-play_neural_outputs_live(history, tempo=120)
+play_neural_outputs_live(history, tempo=60)
 
 # %%
 # note number is neurons as 16 bit integer
@@ -463,7 +489,12 @@ def play_neural_outputs_live(history, tempo=120):
         wave = np.zeros(int(44100 * step_duration))
 
         # make binary digits from outputs
-        binary_digits = list(map(lambda x: 1 if x > 0.9 else 0, outputs))
+        binary_digits = list(map(lambda x: 1 if x > 0.8 else 0, outputs))
+
+        # truncate binary digits to 2^7 bits
+        binary_digits = binary_digits[: 2**7]
+        if len(binary_digits) < 2**7:
+            binary_digits.extend([0] * (2**7 - len(binary_digits)))
 
         # convert binary digits to integer
         note_number = int("".join(map(str, binary_digits)), 2)
