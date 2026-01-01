@@ -423,7 +423,14 @@ import numpy as np
 import time
 
 
-def play_neural_outputs_live(history, tempo=120):
+def find_threshold(history, percentile=0.8):
+    """Find the threshold value that keeps the top percentile of the output history."""
+    outputs = np.array(history["outputs"])
+    threshold = np.percentile(outputs, percentile * 100)
+    return threshold
+
+
+def play_neural_outputs_live(history, tempo=120, threshold=0.5):
     """Play neural network outputs as audio in real-time"""
     pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
     pygame.init()
@@ -440,7 +447,7 @@ def play_neural_outputs_live(history, tempo=120):
         mixed_audio = np.zeros(int(44100 * step_duration))
 
         for neuron_idx, output_value in enumerate(outputs):
-            if output_value > 0.8:  # Threshold for activation
+            if output_value > threshold:  # Threshold for activation
                 # Map neuron index to frequency (each neuron gets a different note)
                 frequency = base_freq * (freq_ratio ** ((neuron_idx * 5) % 36))
 
@@ -466,7 +473,9 @@ def play_neural_outputs_live(history, tempo=120):
         time.sleep(step_duration)
 
 
-play_neural_outputs_live(history, tempo=60)
+threshold = find_threshold(history, percentile=0.95)
+print(f"Threshold: {threshold:.3f}")
+play_neural_outputs_live(history, tempo=60, threshold=threshold)
 
 # %%
 # note number is neurons as 16 bit integer
