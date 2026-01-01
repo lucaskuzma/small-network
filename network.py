@@ -377,7 +377,7 @@ network.set_diagonal_weights(0)  # no self-feedback
 # Print spectral radius to see network dynamics regime
 print(f"Spectral radius: {network.get_spectral_radius():.3f}")
 
-network.enable_activation_leak(0.97)
+network.enable_activation_leak(0.9)
 network.enable_refraction_decay(2, 0.75, 8)
 
 network.randomize_threshold_variations(range=0.0, period=0)
@@ -473,9 +473,9 @@ def play_neural_outputs_live(history, tempo=120, threshold=0.5):
         time.sleep(step_duration)
 
 
-threshold = find_threshold(history, percentile=0.95)
+threshold = find_threshold(history, percentile=0.90)
 print(f"Threshold: {threshold:.3f}")
-play_neural_outputs_live(history, tempo=60, threshold=threshold)
+play_neural_outputs_live(history, tempo=120, threshold=threshold)
 
 # %%
 # note number is neurons as 16 bit integer
@@ -487,7 +487,7 @@ import time
 volume = 0.5
 
 
-def play_neural_outputs_live(history, tempo=120):
+def play_neural_outputs_live(history, tempo=120, threshold=0.298):
     """Play neural network outputs as audio in real-time"""
     pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
     pygame.init()
@@ -503,7 +503,7 @@ def play_neural_outputs_live(history, tempo=120):
         wave = np.zeros(int(44100 * step_duration))
 
         # make binary digits from outputs
-        binary_digits = list(map(lambda x: 1 if x > 0.8 else 0, outputs))
+        binary_digits = list(map(lambda x: 1 if x > threshold else 0, outputs))
 
         # truncate binary digits to 2^7 bits
         binary_digits = binary_digits[: 2**7]
@@ -533,7 +533,7 @@ def play_neural_outputs_live(history, tempo=120):
         time.sleep(step_duration)
 
 
-play_neural_outputs_live(history, tempo=120)
+play_neural_outputs_live(history, tempo=90)
 
 # %%
 
