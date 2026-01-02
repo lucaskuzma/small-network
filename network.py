@@ -827,15 +827,41 @@ import numpy as np
 import time
 
 
-def find_threshold(history, percentile=0.8, key="outputs"):
-    """Find the threshold value that keeps the top percentile of the output history."""
-    data = np.array(history[key])
-    threshold = np.percentile(data, percentile * 100)
-    return threshold
+def find_threshold(history, percentile=0.8, key="outputs", per_channel=True):
+    """
+    Find threshold value(s) that keep the top percentile of the output history.
+
+    Args:
+        history: dict containing time series data
+        percentile: percentile threshold (0-1)
+        key: which data to use from history
+        per_channel: if True, compute one threshold per channel; if False, compute global threshold
+
+    Returns:
+        array of thresholds (one per channel) if per_channel=True, else single float
+    """
+    data = np.array(history[key])  # (T, D) shape
+
+    if per_channel:
+        # Compute threshold for each channel independently
+        thresholds = np.percentile(data, percentile * 100, axis=0)
+        return thresholds
+    else:
+        # Global threshold across all data
+        threshold = np.percentile(data, percentile * 100)
+        return threshold
 
 
 def play_neural_outputs_live(history, tempo=120, threshold=0.5, key="outputs"):
-    """Play neural network data as audio in real-time"""
+    """
+    Play neural network data as audio in real-time.
+
+    Args:
+        history: dict containing time series data
+        tempo: beats per minute
+        threshold: single float or array of thresholds (one per channel)
+        key: which data to use from history
+    """
     pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
     pygame.init()
 
@@ -856,12 +882,22 @@ def play_neural_outputs_live(history, tempo=120, threshold=0.5, key="outputs"):
     # Calculate time per step
     step_duration = 60.0 / tempo / 4  # Assuming 16th notes
 
+    # Convert threshold to array if needed
+    threshold_array = np.atleast_1d(threshold)
+
     for step, outputs in enumerate(history[key]):
         # Mix all active neurons for this time step
         mixed_audio = np.zeros(int(44100 * step_duration))
 
         for index, output_value in enumerate(outputs):
-            if output_value > threshold:  # Threshold for activation
+            # Get threshold for this channel (or use single threshold for all)
+            thresh = (
+                threshold_array[index]
+                if index < len(threshold_array)
+                else threshold_array[0]
+            )
+
+            if output_value > thresh:  # Threshold for activation
                 # Map neuron index to frequency (each neuron gets a different note)
                 # frequency = base_freq * (freq_ratio ** ((index * 5) % 36))
                 frequency = major_scale_freqs[index % len(major_scale)]
@@ -888,9 +924,9 @@ def play_neural_outputs_live(history, tempo=120, threshold=0.5, key="outputs"):
         time.sleep(step_duration)
 
 
-threshold = find_threshold(history, percentile=0.50, key="clusters")
-print(f"Threshold: {threshold:.3f}")
-play_neural_outputs_live(history, tempo=60, threshold=threshold, key="clusters")
+thresholds = find_threshold(history, percentile=0.80, key="clusters", per_channel=True)
+print(f"Thresholds (per cluster): {thresholds}")
+play_neural_outputs_live(history, tempo=60, threshold=thresholds, key="clusters")
 
 # %%
 # note number is neurons as 16 bit integer
