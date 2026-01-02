@@ -363,7 +363,7 @@ def plot_neural_heatmap(history, data_type="activations", num_neurons=64):
 
 # =======================================================================
 
-network = NeuralNetwork(num_neurons=64, num_outputs=8)
+network = NeuralNetwork(num_neurons=256, num_outputs=8)
 steps = 256
 network.clear()
 network.set_output_identity()
@@ -378,7 +378,7 @@ network.set_diagonal_weights(0)  # no self-feedback
 print(f"Spectral radius: {network.get_spectral_radius():.3f}")
 
 network.enable_activation_leak(0.9)
-network.enable_refraction_decay(2, 0.75, 8)
+network.enable_refraction_decay(2, 0.75, 32)
 
 network.randomize_threshold_variations(range=0.0, period=0)
 
@@ -840,8 +840,18 @@ def play_neural_outputs_live(history, tempo=120, threshold=0.5, key="outputs"):
     pygame.init()
 
     # Map each neuron to a different frequency
-    base_freq = 110  # A2
+    base_freq = 220  # A3
     freq_ratio = 2 ** (1 / 12)  # Semitone ratio
+
+    # try with phrygian dominant scale
+    phrygian_dominant_scale = [0, 1, 4, 5, 7, 8, 10]
+    phrygian_dominant_scale_freqs = [
+        base_freq * (freq_ratio**i) for i in phrygian_dominant_scale
+    ]
+
+    # or major scale
+    major_scale = [0, 2, 4, 5, 7, 9, 11]
+    major_scale_freqs = [base_freq * (freq_ratio**i) for i in major_scale]
 
     # Calculate time per step
     step_duration = 60.0 / tempo / 4  # Assuming 16th notes
@@ -850,10 +860,11 @@ def play_neural_outputs_live(history, tempo=120, threshold=0.5, key="outputs"):
         # Mix all active neurons for this time step
         mixed_audio = np.zeros(int(44100 * step_duration))
 
-        for neuron_idx, output_value in enumerate(outputs):
+        for index, output_value in enumerate(outputs):
             if output_value > threshold:  # Threshold for activation
                 # Map neuron index to frequency (each neuron gets a different note)
-                frequency = base_freq * (freq_ratio ** ((neuron_idx * 5) % 36))
+                # frequency = base_freq * (freq_ratio ** ((index * 5) % 36))
+                frequency = major_scale_freqs[index % len(major_scale)]
 
                 # Generate sine wave for this neuron
                 t = np.linspace(0, step_duration, len(mixed_audio))
@@ -877,9 +888,9 @@ def play_neural_outputs_live(history, tempo=120, threshold=0.5, key="outputs"):
         time.sleep(step_duration)
 
 
-threshold = find_threshold(history, percentile=0.90, key="clusters")
+threshold = find_threshold(history, percentile=0.50, key="clusters")
 print(f"Threshold: {threshold:.3f}")
-play_neural_outputs_live(history, tempo=120, threshold=threshold, key="clusters")
+play_neural_outputs_live(history, tempo=60, threshold=threshold, key="clusters")
 
 # %%
 # note number is neurons as 16 bit integer
