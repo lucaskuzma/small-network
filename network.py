@@ -730,6 +730,41 @@ def plot_cluster_activations(history, clusters, data_type="activations"):
     plt.show()
 
 
+def compute_cluster_means(history, clusters, data_type="activations"):
+    """
+    Compute mean activation for each cluster over time.
+
+    Args:
+        history: dict with 'activations' key containing (T, D) data
+        clusters: dict mapping cluster_id to list of neuron indices
+        data_type: which data to use from history (default: "activations")
+
+    Returns:
+        list of arrays, where each element is the cluster means at that timestep
+        Format matches history["outputs"]: [(n_clusters,), (n_clusters,), ...]
+    """
+    activations = np.array(history[data_type])  # (T, D)
+    T = activations.shape[0]
+
+    # Get cluster IDs in sorted order for consistent indexing
+    cluster_ids = sorted(clusters.keys())
+    n_clusters = len(cluster_ids)
+
+    # Build list of arrays, one per timestep
+    cluster_means_list = []
+    for t in range(T):
+        means_at_t = np.zeros(n_clusters)
+        for idx, cluster_id in enumerate(cluster_ids):
+            members = clusters[cluster_id]
+            if len(members) > 0:
+                means_at_t[idx] = np.mean(activations[t, members])
+            else:
+                means_at_t[idx] = 0.0
+        cluster_means_list.append(means_at_t)
+
+    return cluster_means_list
+
+
 # Compute synchronization from activation history
 sync_matrices = compute_synchronization_over_time(history, "activations")
 
@@ -773,6 +808,17 @@ for cluster_id, members in clusters.items():
 # Plot activations for each cluster
 plot_cluster_activations(history, clusters, data_type="activations")
 
+# Compute and save cluster mean activations to history
+history["clusters"] = compute_cluster_means(history, clusters, data_type="activations")
+cluster_array = np.array(history["clusters"])  # (T, n_clusters)
+print("\n=== Cluster Mean Activations Saved to history['clusters'] ===")
+print(
+    f"Format: list of {len(history['clusters'])} timesteps, each with {cluster_array.shape[1]} cluster means"
+)
+print(f"Shape when converted to array: {cluster_array.shape} (time, n_clusters)")
+print(f"Value range: [{cluster_array.min():.3f}, {cluster_array.max():.3f}]")
+print(f"Cluster indices: {sorted(clusters.keys())}")
+
 # %%
 # each neuron gets a different frequency
 
@@ -781,15 +827,15 @@ import numpy as np
 import time
 
 
-def find_threshold(history, percentile=0.8):
+def find_threshold(history, percentile=0.8, key="outputs"):
     """Find the threshold value that keeps the top percentile of the output history."""
-    outputs = np.array(history["outputs"])
-    threshold = np.percentile(outputs, percentile * 100)
+    data = np.array(history[key])
+    threshold = np.percentile(data, percentile * 100)
     return threshold
 
 
-def play_neural_outputs_live(history, tempo=120, threshold=0.5):
-    """Play neural network outputs as audio in real-time"""
+def play_neural_outputs_live(history, tempo=120, threshold=0.5, key="outputs"):
+    """Play neural network data as audio in real-time"""
     pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
     pygame.init()
 
@@ -800,7 +846,7 @@ def play_neural_outputs_live(history, tempo=120, threshold=0.5):
     # Calculate time per step
     step_duration = 60.0 / tempo / 4  # Assuming 16th notes
 
-    for step, outputs in enumerate(history["outputs"]):
+    for step, outputs in enumerate(history[key]):
         # Mix all active neurons for this time step
         mixed_audio = np.zeros(int(44100 * step_duration))
 
@@ -831,9 +877,9 @@ def play_neural_outputs_live(history, tempo=120, threshold=0.5):
         time.sleep(step_duration)
 
 
-threshold = find_threshold(history, percentile=0.90)
+threshold = find_threshold(history, percentile=0.90, key="clusters")
 print(f"Threshold: {threshold:.3f}")
-play_neural_outputs_live(history, tempo=120, threshold=threshold)
+play_neural_outputs_live(history, tempo=120, threshold=threshold, key="clusters")
 
 # %%
 # note number is neurons as 16 bit integer
