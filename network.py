@@ -769,58 +769,93 @@ def compute_windowed_coherence(
     history, clusters, window_size=16, data_type="activations"
 ):
     """
-    Compute within-cluster synchronization strength over time using sliding windows.
+    Compute within-cluster correlation over time using sliding windows.
 
     Coherence measures how correlated the neurons within a cluster are at each moment.
     High coherence = neurons firing together. Low coherence = neurons out of sync.
-
-    Args:
-        history: dict with activations
-        clusters: dict mapping cluster_id to list of neuron indices
-        window_size: number of timesteps to look back for correlation
-        data_type: which data to use
+    NOTE: This is NORMALIZED (correlation) - magnitude doesn't matter, only pattern.
 
     Returns:
         dict of {cluster_id: array of coherence values over time}
     """
+    import warnings
+
     activations = np.array(history[data_type])  # (T, D)
     T = activations.shape[0]
 
     cluster_coherence = {cid: np.zeros(T) for cid in clusters}
 
     for t in range(T):
-        # Define window (look back from current time)
         start = max(0, t - window_size + 1)
-        window = activations[start : t + 1, :]  # (window, D)
+        window = activations[start : t + 1, :]
 
         for cluster_id, members in clusters.items():
             if len(members) < 2:
-                cluster_coherence[cluster_id][
-                    t
-                ] = 1.0  # Single neuron = perfectly coherent
+                cluster_coherence[cluster_id][t] = 1.0
                 continue
 
-            # Extract this cluster's neurons over the window
-            cluster_window = window[:, members]  # (window, n_members)
+            cluster_window = window[:, members]
 
-            if cluster_window.shape[0] > 1:  # Need at least 2 timepoints
-                # Compute pairwise correlations between neurons
-                # Each column is a neuron's time series
-                corr_matrix = np.corrcoef(cluster_window.T)  # (n_members, n_members)
-
-                # Extract upper triangle (unique pairwise correlations)
-                upper_tri = corr_matrix[np.triu_indices(len(members), k=1)]
-
-                # Handle NaN (can occur if a neuron has zero variance)
-                coherence = np.nanmean(upper_tri)
-                if np.isnan(coherence):
-                    coherence = 0.0
+            if cluster_window.shape[0] > 1:
+                # Check if there's enough variance
+                variances = np.var(cluster_window, axis=0)
+                if np.all(variances < 1e-10):
+                    coherence = 0.0  # No variance = can't compute correlation
+                else:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        corr_matrix = np.corrcoef(cluster_window.T)
+                        upper_tri = corr_matrix[np.triu_indices(len(members), k=1)]
+                        valid = upper_tri[~np.isnan(upper_tri)]
+                        coherence = np.mean(valid) if len(valid) > 0 else 0.0
             else:
                 coherence = 1.0
 
             cluster_coherence[cluster_id][t] = coherence
 
     return cluster_coherence
+
+
+def compute_windowed_sync(history, clusters, window_size=16, data_type="activations"):
+    """
+    Compute within-cluster sync (dot product) over time using sliding windows.
+
+    This matches how clusters were built (cumulative sync = inner product of histories).
+    Unlike correlation, this is NOT normalized - magnitude matters.
+    High when neurons are active together. Low when neurons are inactive or out of sync.
+
+    Returns:
+        dict of {cluster_id: array of sync values over time}
+    """
+    activations = np.array(history[data_type])  # (T, D)
+    T = activations.shape[0]
+
+    cluster_sync = {cid: np.zeros(T) for cid in clusters}
+
+    for t in range(T):
+        start = max(0, t - window_size + 1)
+        window = activations[start : t + 1, :]
+
+        for cluster_id, members in clusters.items():
+            if len(members) < 2:
+                cluster_sync[cluster_id][t] = 0.0
+                continue
+
+            cluster_window = window[:, members]  # (window, n_members)
+
+            # Compute sync matrix: Z @ Z.T (like the full sync matrix, but windowed)
+            Z = cluster_window.T  # (n_members, window)
+            S = Z @ Z.T  # (n_members, n_members)
+
+            # Mean of off-diagonal elements (pairwise sync)
+            n = len(members)
+            off_diag_sum = np.sum(S) - np.trace(S)
+            n_pairs = n * (n - 1)
+            sync_value = off_diag_sum / n_pairs if n_pairs > 0 else 0.0
+
+            cluster_sync[cluster_id][t] = sync_value
+
+    return cluster_sync
 
 
 def plot_cluster_coherence(cluster_coherence, clusters, window_size=16):
@@ -882,49 +917,110 @@ def plot_cluster_coherence(cluster_coherence, clusters, window_size=16):
     plt.show()
 
 
-def plot_coherence_comparison(
-    cluster_coherence, history, clusters, data_type="activations"
+def compute_windowed_variance(
+    history, clusters, window_size=16, data_type="activations"
 ):
     """
-    Compare coherence vs mean activation for each cluster side by side.
+    Compute mean within-cluster variance over time.
+    Low variance = neurons are all doing the same thing (stable but poor for correlation).
+    """
+    activations = np.array(history[data_type])
+    T = activations.shape[0]
+
+    cluster_variance = {cid: np.zeros(T) for cid in clusters}
+
+    for t in range(T):
+        start = max(0, t - window_size + 1)
+        window = activations[start : t + 1, :]
+
+        for cluster_id, members in clusters.items():
+            if len(members) < 2:
+                cluster_variance[cluster_id][t] = 0.0
+                continue
+
+            cluster_window = window[:, members]
+            # Mean variance across neurons in the window
+            var_per_neuron = np.var(cluster_window, axis=0)
+            cluster_variance[cluster_id][t] = np.mean(var_per_neuron)
+
+    return cluster_variance
+
+
+def plot_coherence_comparison(
+    cluster_coherence, history, clusters, data_type="activations", window_size=16
+):
+    """
+    Compare mean activation, variance, windowed sync, and correlation for each cluster.
+    Shows relationship between different measures of cluster activity.
     """
     activations = np.array(history[data_type])
     n_clusters = len(clusters)
+
+    # Compute variance and windowed sync
+    cluster_variance = compute_windowed_variance(
+        history, clusters, window_size, data_type
+    )
+    cluster_sync = compute_windowed_sync(history, clusters, window_size, data_type)
 
     colors = plt.cm.tab10(np.linspace(0, 1, max(10, n_clusters)))
     cluster_ids = sorted(cluster_coherence.keys())
 
     fig, axes = plt.subplots(
-        n_clusters, 2, figsize=(12, 2.5 * n_clusters), squeeze=False
+        n_clusters, 4, figsize=(18, 2.5 * n_clusters), squeeze=False
     )
 
     for idx, cluster_id in enumerate(cluster_ids):
         color = colors[idx % len(colors)]
         members = clusters[cluster_id]
         coherence = cluster_coherence[cluster_id]
+        variance = cluster_variance[cluster_id]
+        sync = cluster_sync[cluster_id]
 
         # Compute mean activation
         mean_activation = np.mean(activations[:, members], axis=1)
 
-        # Left: Mean activation
+        # Col 0: Mean activation
         axes[idx, 0].plot(mean_activation, color=color, linewidth=1.5)
-        axes[idx, 0].set_ylabel("Mean Activation")
+        axes[idx, 0].set_ylabel("Mean Act")
         axes[idx, 0].set_title(f"Cluster {cluster_id}: Mean Activation")
         axes[idx, 0].set_ylim(0, 1)
         axes[idx, 0].grid(True, alpha=0.3)
 
-        # Right: Coherence
-        axes[idx, 1].plot(coherence, color=color, linewidth=1.5)
-        axes[idx, 1].set_ylabel("Coherence")
-        axes[idx, 1].set_title(f"Cluster {cluster_id}: Coherence")
-        axes[idx, 1].set_ylim(-1.1, 1.1)
-        axes[idx, 1].axhline(y=0, color="gray", linestyle="--", alpha=0.5)
+        # Col 1: Variance
+        axes[idx, 1].plot(variance, color=color, linewidth=1.5)
+        axes[idx, 1].set_ylabel("Variance")
+        axes[idx, 1].set_title(f"Cluster {cluster_id}: Variance")
         axes[idx, 1].grid(True, alpha=0.3)
 
-    axes[-1, 0].set_xlabel("Time Step")
-    axes[-1, 1].set_xlabel("Time Step")
+        # Col 2: Windowed Sync (dot product - matches how clusters were built)
+        axes[idx, 2].plot(sync, color=color, linewidth=1.5)
+        axes[idx, 2].set_ylabel("Sync")
+        axes[idx, 2].set_title(f"Cluster {cluster_id}: Windowed Sync (dot product)")
+        axes[idx, 2].grid(True, alpha=0.3)
+        axes[idx, 2].text(
+            0.02,
+            0.98,
+            f"μ={np.mean(sync):.3f}",
+            transform=axes[idx, 2].transAxes,
+            fontsize=8,
+            verticalalignment="top",
+        )
 
-    fig.suptitle("Mean Activation vs Within-Cluster Coherence", fontsize=14)
+        # Col 3: Coherence (correlation - normalized)
+        axes[idx, 3].plot(coherence, color=color, linewidth=1.5)
+        axes[idx, 3].set_ylabel("Correlation")
+        axes[idx, 3].set_title(f"Cluster {cluster_id}: Coherence (correlation)")
+        axes[idx, 3].set_ylim(-1.1, 1.1)
+        axes[idx, 3].axhline(y=0, color="gray", linestyle="--", alpha=0.5)
+        axes[idx, 3].grid(True, alpha=0.3)
+
+    for i in range(4):
+        axes[-1, i].set_xlabel("Time Step")
+
+    fig.suptitle(
+        "Mean Activation | Variance | Windowed Sync (like clustering) | Correlation",
+        fontsize=14,
+    )
     plt.tight_layout()
     plt.show()
 
@@ -990,8 +1086,8 @@ cluster_coherence = compute_windowed_coherence(
 )
 plot_cluster_coherence(cluster_coherence, clusters, window_size=window_size)
 
-# Compare coherence vs mean activation side by side
-plot_coherence_comparison(cluster_coherence, history, clusters)
+# Compare coherence vs mean activation vs variance side by side
+plot_coherence_comparison(cluster_coherence, history, clusters, window_size=window_size)
 
 # %%
 # each neuron gets a different frequency
