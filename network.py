@@ -765,6 +765,170 @@ def compute_cluster_means(history, clusters, data_type="activations"):
     return cluster_means_list
 
 
+def compute_windowed_coherence(
+    history, clusters, window_size=16, data_type="activations"
+):
+    """
+    Compute within-cluster synchronization strength over time using sliding windows.
+
+    Coherence measures how correlated the neurons within a cluster are at each moment.
+    High coherence = neurons firing together. Low coherence = neurons out of sync.
+
+    Args:
+        history: dict with activations
+        clusters: dict mapping cluster_id to list of neuron indices
+        window_size: number of timesteps to look back for correlation
+        data_type: which data to use
+
+    Returns:
+        dict of {cluster_id: array of coherence values over time}
+    """
+    activations = np.array(history[data_type])  # (T, D)
+    T = activations.shape[0]
+
+    cluster_coherence = {cid: np.zeros(T) for cid in clusters}
+
+    for t in range(T):
+        # Define window (look back from current time)
+        start = max(0, t - window_size + 1)
+        window = activations[start : t + 1, :]  # (window, D)
+
+        for cluster_id, members in clusters.items():
+            if len(members) < 2:
+                cluster_coherence[cluster_id][
+                    t
+                ] = 1.0  # Single neuron = perfectly coherent
+                continue
+
+            # Extract this cluster's neurons over the window
+            cluster_window = window[:, members]  # (window, n_members)
+
+            if cluster_window.shape[0] > 1:  # Need at least 2 timepoints
+                # Compute pairwise correlations between neurons
+                # Each column is a neuron's time series
+                corr_matrix = np.corrcoef(cluster_window.T)  # (n_members, n_members)
+
+                # Extract upper triangle (unique pairwise correlations)
+                upper_tri = corr_matrix[np.triu_indices(len(members), k=1)]
+
+                # Handle NaN (can occur if a neuron has zero variance)
+                coherence = np.nanmean(upper_tri)
+                if np.isnan(coherence):
+                    coherence = 0.0
+            else:
+                coherence = 1.0
+
+            cluster_coherence[cluster_id][t] = coherence
+
+    return cluster_coherence
+
+
+def plot_cluster_coherence(cluster_coherence, clusters, window_size=16):
+    """
+    Plot coherence over time for each cluster.
+    Shows how synchronized neurons within each cluster are at each moment.
+    """
+    n_clusters = len(clusters)
+
+    # Use same color palette as cluster activations
+    colors = plt.cm.tab10(np.linspace(0, 1, max(10, n_clusters)))
+
+    # Calculate grid dimensions
+    cols = min(3, n_clusters)
+    rows = (n_clusters + cols - 1) // cols
+
+    fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 3 * rows), squeeze=False)
+    axes = axes.flatten()
+
+    cluster_ids = sorted(cluster_coherence.keys())
+
+    for idx, cluster_id in enumerate(cluster_ids):
+        ax = axes[idx]
+        color = colors[idx % len(colors)]
+        coherence = cluster_coherence[cluster_id]
+        members = clusters[cluster_id]
+
+        ax.plot(coherence, color=color, linewidth=1.5)
+        ax.axhline(y=0, color="gray", linestyle="--", alpha=0.5)
+        ax.axhline(y=0.5, color="gray", linestyle=":", alpha=0.5)
+
+        ax.set_xlabel("Time Step")
+        ax.set_ylabel("Coherence")
+        ax.set_title(f"Cluster {cluster_id} ({len(members)} neurons)")
+        ax.set_ylim(-1.1, 1.1)
+        ax.grid(True, alpha=0.3)
+
+        # Show stats
+        mean_coh = np.mean(coherence)
+        ax.text(
+            0.02,
+            0.98,
+            f"μ={mean_coh:.2f}",
+            transform=ax.transAxes,
+            fontsize=9,
+            verticalalignment="top",
+        )
+
+    # Hide unused axes
+    for idx in range(n_clusters, len(axes)):
+        axes[idx].set_visible(False)
+
+    fig.suptitle(
+        f"Within-Cluster Coherence Over Time (window={window_size})",
+        fontsize=14,
+        y=1.02,
+    )
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_coherence_comparison(
+    cluster_coherence, history, clusters, data_type="activations"
+):
+    """
+    Compare coherence vs mean activation for each cluster side by side.
+    """
+    activations = np.array(history[data_type])
+    n_clusters = len(clusters)
+
+    colors = plt.cm.tab10(np.linspace(0, 1, max(10, n_clusters)))
+    cluster_ids = sorted(cluster_coherence.keys())
+
+    fig, axes = plt.subplots(
+        n_clusters, 2, figsize=(12, 2.5 * n_clusters), squeeze=False
+    )
+
+    for idx, cluster_id in enumerate(cluster_ids):
+        color = colors[idx % len(colors)]
+        members = clusters[cluster_id]
+        coherence = cluster_coherence[cluster_id]
+
+        # Compute mean activation
+        mean_activation = np.mean(activations[:, members], axis=1)
+
+        # Left: Mean activation
+        axes[idx, 0].plot(mean_activation, color=color, linewidth=1.5)
+        axes[idx, 0].set_ylabel("Mean Activation")
+        axes[idx, 0].set_title(f"Cluster {cluster_id}: Mean Activation")
+        axes[idx, 0].set_ylim(0, 1)
+        axes[idx, 0].grid(True, alpha=0.3)
+
+        # Right: Coherence
+        axes[idx, 1].plot(coherence, color=color, linewidth=1.5)
+        axes[idx, 1].set_ylabel("Coherence")
+        axes[idx, 1].set_title(f"Cluster {cluster_id}: Coherence")
+        axes[idx, 1].set_ylim(-1.1, 1.1)
+        axes[idx, 1].axhline(y=0, color="gray", linestyle="--", alpha=0.5)
+        axes[idx, 1].grid(True, alpha=0.3)
+
+    axes[-1, 0].set_xlabel("Time Step")
+    axes[-1, 1].set_xlabel("Time Step")
+
+    fig.suptitle("Mean Activation vs Within-Cluster Coherence", fontsize=14)
+    plt.tight_layout()
+    plt.show()
+
+
 # Compute synchronization from activation history
 sync_matrices = compute_synchronization_over_time(history, "activations")
 
@@ -818,6 +982,16 @@ print(
 print(f"Shape when converted to array: {cluster_array.shape} (time, n_clusters)")
 print(f"Value range: [{cluster_array.min():.3f}, {cluster_array.max():.3f}]")
 print(f"Cluster indices: {sorted(clusters.keys())}")
+
+# Compute and plot within-cluster coherence
+window_size = 16  # Adjust this to see different temporal scales
+cluster_coherence = compute_windowed_coherence(
+    history, clusters, window_size=window_size
+)
+plot_cluster_coherence(cluster_coherence, clusters, window_size=window_size)
+
+# Compare coherence vs mean activation side by side
+plot_coherence_comparison(cluster_coherence, history, clusters)
 
 # %%
 # each neuron gets a different frequency
@@ -924,9 +1098,10 @@ def play_neural_outputs_live(history, tempo=120, threshold=0.5, key="outputs"):
         time.sleep(step_duration)
 
 
-thresholds = find_threshold(history, percentile=0.80, key="clusters", per_channel=True)
+key = "clusters"
+thresholds = find_threshold(history, percentile=0.80, key=key, per_channel=True)
 print(f"Thresholds (per cluster): {thresholds}")
-play_neural_outputs_live(history, tempo=60, threshold=thresholds, key="clusters")
+play_neural_outputs_live(history, tempo=60, threshold=thresholds, key=key)
 
 # %%
 # note number is neurons as 16 bit integer
