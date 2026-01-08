@@ -1085,6 +1085,103 @@ def plot_coherence_comparison(
     plt.show()
 
 
+def plot_cluster_metrics_overlaid(
+    cluster_coherence, history, clusters, data_type="activations", window_size=16
+):
+    """
+    Plot all metrics overlaid on one graph per cluster for easier comparison.
+    Shows: Mean Activation, Variance, Sync, Correlation, Inv MSE
+    """
+    activations = np.array(history[data_type])
+    n_clusters = len(clusters)
+
+    # Compute all metrics
+    cluster_variance = compute_windowed_variance(
+        history, clusters, window_size, data_type
+    )
+    cluster_sync = compute_windowed_sync(history, clusters, window_size, data_type)
+    cluster_inv_mse = compute_windowed_inv_mse(
+        history, clusters, window_size, data_type
+    )
+
+    cluster_ids = sorted(cluster_coherence.keys())
+
+    # Calculate grid dimensions
+    cols = min(2, n_clusters)
+    rows = (n_clusters + cols - 1) // cols
+
+    fig, axes = plt.subplots(rows, cols, figsize=(8 * cols, 5 * rows), squeeze=False)
+    axes = axes.flatten()
+
+    for idx, cluster_id in enumerate(cluster_ids):
+        ax = axes[idx]
+        members = clusters[cluster_id]
+
+        coherence = cluster_coherence[cluster_id]
+        variance = cluster_variance[cluster_id]
+        sync = cluster_sync[cluster_id]
+        inv_mse = cluster_inv_mse[cluster_id]
+        mean_activation = np.mean(activations[:, members], axis=1)
+
+        T = len(mean_activation)
+        t = np.arange(T)
+
+        # Normalize sync for comparison (it can have different scale)
+        sync_max = np.max(sync) if np.max(sync) > 0 else 1
+        sync_normalized = sync / sync_max
+
+        # Normalize variance for comparison
+        var_max = np.max(variance) if np.max(variance) > 0 else 1
+        var_normalized = variance / var_max
+
+        # Plot all metrics
+        ax.plot(t, mean_activation, label="Mean Activation", linewidth=2, color="blue")
+        ax.plot(
+            t,
+            var_normalized,
+            label=f"Variance (norm, max={var_max:.4f})",
+            linewidth=1.5,
+            color="orange",
+            linestyle="--",
+        )
+        ax.plot(
+            t,
+            sync_normalized,
+            label=f"Sync (norm, max={sync_max:.3f})",
+            linewidth=1.5,
+            color="green",
+            linestyle="-.",
+        )
+        ax.plot(
+            t,
+            (coherence + 1) / 2,
+            label="Correlation (scaled 0-1)",
+            linewidth=1.5,
+            color="red",
+            alpha=0.7,
+        )
+        ax.plot(t, inv_mse, label="Inv MSE (sameness)", linewidth=2, color="purple")
+
+        ax.set_xlabel("Time Step")
+        ax.set_ylabel("Value (normalized to 0-1)")
+        ax.set_title(
+            f"Cluster {cluster_id} ({len(members)} neurons) - All Metrics Overlaid"
+        )
+        ax.set_ylim(-0.1, 1.1)
+        ax.legend(loc="upper right", fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+    # Hide unused axes
+    for idx in range(n_clusters, len(axes)):
+        axes[idx].set_visible(False)
+
+    fig.suptitle(
+        f"All Cluster Metrics Overlaid (window={window_size})", fontsize=14, y=1.02
+    )
+    plt.tight_layout()
+    plt.show()
+
+
 # Compute synchronization from activation history
 sync_matrices = compute_synchronization_over_time(history, "activations")
 
@@ -1139,15 +1236,19 @@ print(f"Shape when converted to array: {cluster_array.shape} (time, n_clusters)"
 print(f"Value range: [{cluster_array.min():.3f}, {cluster_array.max():.3f}]")
 print(f"Cluster indices: {sorted(clusters.keys())}")
 
-# Compute and plot within-cluster coherence
+# Compute within-cluster coherence
 window_size = 16  # Adjust this to see different temporal scales
 cluster_coherence = compute_windowed_coherence(
     history, clusters, window_size=window_size
 )
-plot_cluster_coherence(cluster_coherence, clusters, window_size=window_size)
 
-# Compare coherence vs mean activation vs variance side by side
+# Compare all metrics side by side (5 columns)
 plot_coherence_comparison(cluster_coherence, history, clusters, window_size=window_size)
+
+# Overlay all metrics on one graph per cluster for easier comparison
+plot_cluster_metrics_overlaid(
+    cluster_coherence, history, clusters, window_size=window_size
+)
 
 # %%
 # each neuron gets a different frequency
@@ -1179,7 +1280,7 @@ def find_threshold(history, percentile=0.8, key="outputs", per_channel=True):
     else:
         # Global threshold across all data
         threshold = np.percentile(data, percentile * 100)
-        return threshold
+    return threshold
 
 
 def play_neural_outputs_live(history, tempo=120, threshold=0.5, key="outputs"):
