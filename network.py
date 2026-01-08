@@ -858,6 +858,55 @@ def compute_windowed_sync(history, clusters, window_size=16, data_type="activati
     return cluster_sync
 
 
+def compute_windowed_inv_mse(
+    history, clusters, window_size=16, data_type="activations"
+):
+    """
+    Compute within-cluster inverse MSE over time using sliding windows.
+
+    1 / (1 + MSE) - high when neurons have similar values at all times,
+    INCLUDING when they're both at zero (unlike correlation).
+
+    Returns:
+        dict of {cluster_id: array of inv_mse values over time}
+    """
+    activations = np.array(history[data_type])  # (T, D)
+    T = activations.shape[0]
+
+    cluster_inv_mse = {cid: np.zeros(T) for cid in clusters}
+
+    for t in range(T):
+        start = max(0, t - window_size + 1)
+        window = activations[start : t + 1, :]
+
+        for cluster_id, members in clusters.items():
+            if len(members) < 2:
+                cluster_inv_mse[cluster_id][
+                    t
+                ] = 1.0  # Single neuron = perfect similarity
+                continue
+
+            cluster_window = window[:, members]  # (window, n_members)
+
+            # Compute mean pairwise MSE between neurons
+            n = len(members)
+            total_mse = 0.0
+            n_pairs = 0
+
+            for i in range(n):
+                for j in range(i + 1, n):
+                    mse = np.mean((cluster_window[:, i] - cluster_window[:, j]) ** 2)
+                    total_mse += mse
+                    n_pairs += 1
+
+            mean_mse = total_mse / n_pairs if n_pairs > 0 else 0.0
+            inv_mse = 1.0 / (1.0 + mean_mse)
+
+            cluster_inv_mse[cluster_id][t] = inv_mse
+
+    return cluster_inv_mse
+
+
 def plot_cluster_coherence(cluster_coherence, clusters, window_size=16):
     """
     Plot coherence over time for each cluster.
@@ -950,23 +999,26 @@ def plot_coherence_comparison(
     cluster_coherence, history, clusters, data_type="activations", window_size=16
 ):
     """
-    Compare mean activation, variance, windowed sync, and correlation for each cluster.
+    Compare mean activation, variance, windowed sync, correlation, and inverse MSE for each cluster.
     Shows relationship between different measures of cluster activity.
     """
     activations = np.array(history[data_type])
     n_clusters = len(clusters)
 
-    # Compute variance and windowed sync
+    # Compute additional metrics
     cluster_variance = compute_windowed_variance(
         history, clusters, window_size, data_type
     )
     cluster_sync = compute_windowed_sync(history, clusters, window_size, data_type)
+    cluster_inv_mse = compute_windowed_inv_mse(
+        history, clusters, window_size, data_type
+    )
 
     colors = plt.cm.tab10(np.linspace(0, 1, max(10, n_clusters)))
     cluster_ids = sorted(cluster_coherence.keys())
 
     fig, axes = plt.subplots(
-        n_clusters, 4, figsize=(18, 2.5 * n_clusters), squeeze=False
+        n_clusters, 5, figsize=(22, 2.5 * n_clusters), squeeze=False
     )
 
     for idx, cluster_id in enumerate(cluster_ids):
@@ -975,6 +1027,7 @@ def plot_coherence_comparison(
         coherence = cluster_coherence[cluster_id]
         variance = cluster_variance[cluster_id]
         sync = cluster_sync[cluster_id]
+        inv_mse = cluster_inv_mse[cluster_id]
 
         # Compute mean activation
         mean_activation = np.mean(activations[:, members], axis=1)
@@ -995,30 +1048,37 @@ def plot_coherence_comparison(
         # Col 2: Windowed Sync (dot product - matches how clusters were built)
         axes[idx, 2].plot(sync, color=color, linewidth=1.5)
         axes[idx, 2].set_ylabel("Sync")
-        axes[idx, 2].set_title(f"Cluster {cluster_id}: Windowed Sync (dot product)")
+        axes[idx, 2].set_title(f"Cluster {cluster_id}: Sync (dot product)")
         axes[idx, 2].grid(True, alpha=0.3)
-        axes[idx, 2].text(
-            0.02,
-            0.98,
-            f"μ={np.mean(sync):.3f}",
-            transform=axes[idx, 2].transAxes,
-            fontsize=8,
-            verticalalignment="top",
-        )
 
         # Col 3: Coherence (correlation - normalized)
         axes[idx, 3].plot(coherence, color=color, linewidth=1.5)
-        axes[idx, 3].set_ylabel("Correlation")
-        axes[idx, 3].set_title(f"Cluster {cluster_id}: Coherence (correlation)")
+        axes[idx, 3].set_ylabel("Corr")
+        axes[idx, 3].set_title(f"Cluster {cluster_id}: Correlation")
         axes[idx, 3].set_ylim(-1.1, 1.1)
         axes[idx, 3].axhline(y=0, color="gray", linestyle="--", alpha=0.5)
         axes[idx, 3].grid(True, alpha=0.3)
 
-    for i in range(4):
+        # Col 4: Inverse MSE (high when similar, including both at zero)
+        axes[idx, 4].plot(inv_mse, color=color, linewidth=1.5)
+        axes[idx, 4].set_ylabel("Inv MSE")
+        axes[idx, 4].set_title(f"Cluster {cluster_id}: 1/(1+MSE)")
+        axes[idx, 4].set_ylim(0, 1.05)
+        axes[idx, 4].grid(True, alpha=0.3)
+        axes[idx, 4].text(
+            0.02,
+            0.98,
+            f"μ={np.mean(inv_mse):.3f}",
+            transform=axes[idx, 4].transAxes,
+            fontsize=8,
+            verticalalignment="top",
+        )
+
+    for i in range(5):
         axes[-1, i].set_xlabel("Time Step")
 
     fig.suptitle(
-        "Mean Activation | Variance | Windowed Sync (like clustering) | Correlation",
+        "Mean Act | Variance | Sync (dot) | Correlation | Inv MSE (sameness)",
         fontsize=14,
     )
     plt.tight_layout()
