@@ -907,6 +907,70 @@ def compute_windowed_inv_mse(
     return cluster_inv_mse
 
 
+def compute_instantaneous_sync(history, clusters, data_type="activations"):
+    """
+    Compute instantaneous sync at each timestep (no window).
+
+    Instantaneous sync = mean pairwise product of activations at each instant.
+    High when multiple neurons are active at the same time.
+    No window = duration comes from network dynamics, not hyperparameters.
+
+    Returns:
+        dict of {cluster_id: array of instant sync values over time}
+    """
+    activations = np.array(history[data_type])  # (T, D)
+    T = activations.shape[0]
+
+    cluster_sync = {cid: np.zeros(T) for cid in clusters}
+
+    for t in range(T):
+        for cluster_id, members in clusters.items():
+            if len(members) < 2:
+                cluster_sync[cluster_id][t] = 0.0
+                continue
+
+            acts = activations[t, members]  # (n_members,)
+
+            # Mean of all pairwise products: (a_i * a_j) for i < j
+            n = len(members)
+            total = 0.0
+            n_pairs = 0
+            for i in range(n):
+                for j in range(i + 1, n):
+                    total += acts[i] * acts[j]
+                    n_pairs += 1
+
+            cluster_sync[cluster_id][t] = total / n_pairs if n_pairs > 0 else 0.0
+
+    return cluster_sync
+
+
+def compute_activation_derivative(history, clusters, data_type="activations"):
+    """
+    Compute derivative (rate of change) of mean activation for each cluster.
+
+    Positive = rising (note attack)
+    Negative = falling (note release)
+    Near zero = stable
+
+    Returns:
+        dict of {cluster_id: array of derivative values over time}
+    """
+    activations = np.array(history[data_type])  # (T, D)
+    T = activations.shape[0]
+
+    cluster_deriv = {cid: np.zeros(T) for cid in clusters}
+
+    for cluster_id, members in clusters.items():
+        mean_act = np.mean(activations[:, members], axis=1)
+        # Compute derivative (diff with padding to keep same length)
+        deriv = np.zeros(T)
+        deriv[1:] = np.diff(mean_act)
+        cluster_deriv[cluster_id] = deriv
+
+    return cluster_deriv
+
+
 def plot_cluster_coherence(cluster_coherence, clusters, window_size=16):
     """
     Plot coherence over time for each cluster.
@@ -1090,7 +1154,7 @@ def plot_cluster_metrics_overlaid(
 ):
     """
     Plot all metrics overlaid on one graph per cluster for easier comparison.
-    Shows: Mean Activation, Variance, Sync, Correlation, Inv MSE
+    Shows: Mean Activation, Windowed Sync, Instant Sync, Correlation, Inv MSE, Derivative
     """
     activations = np.array(history[data_type])
     n_clusters = len(clusters)
@@ -1099,10 +1163,14 @@ def plot_cluster_metrics_overlaid(
     cluster_variance = compute_windowed_variance(
         history, clusters, window_size, data_type
     )
-    cluster_sync = compute_windowed_sync(history, clusters, window_size, data_type)
+    cluster_sync_windowed = compute_windowed_sync(
+        history, clusters, window_size, data_type
+    )
+    cluster_sync_instant = compute_instantaneous_sync(history, clusters, data_type)
     cluster_inv_mse = compute_windowed_inv_mse(
         history, clusters, window_size, data_type
     )
+    cluster_deriv = compute_activation_derivative(history, clusters, data_type)
 
     cluster_ids = sorted(cluster_coherence.keys())
 
@@ -1110,7 +1178,7 @@ def plot_cluster_metrics_overlaid(
     cols = min(2, n_clusters)
     rows = (n_clusters + cols - 1) // cols
 
-    fig, axes = plt.subplots(rows, cols, figsize=(8 * cols, 5 * rows), squeeze=False)
+    fig, axes = plt.subplots(rows, cols, figsize=(10 * cols, 6 * rows), squeeze=False)
     axes = axes.flatten()
 
     for idx, cluster_id in enumerate(cluster_ids):
@@ -1119,56 +1187,70 @@ def plot_cluster_metrics_overlaid(
 
         coherence = cluster_coherence[cluster_id]
         variance = cluster_variance[cluster_id]
-        sync = cluster_sync[cluster_id]
+        sync_win = cluster_sync_windowed[cluster_id]
+        sync_inst = cluster_sync_instant[cluster_id]
         inv_mse = cluster_inv_mse[cluster_id]
+        deriv = cluster_deriv[cluster_id]
         mean_activation = np.mean(activations[:, members], axis=1)
 
         T = len(mean_activation)
         t = np.arange(T)
 
-        # Normalize sync for comparison (it can have different scale)
-        sync_max = np.max(sync) if np.max(sync) > 0 else 1
-        sync_normalized = sync / sync_max
+        # Normalize windowed sync for comparison
+        sync_win_max = np.max(sync_win) if np.max(sync_win) > 0 else 1
+        sync_win_norm = sync_win / sync_win_max
 
-        # Normalize variance for comparison
-        var_max = np.max(variance) if np.max(variance) > 0 else 1
-        var_normalized = variance / var_max
+        # Normalize instant sync for comparison
+        sync_inst_max = np.max(sync_inst) if np.max(sync_inst) > 0 else 1
+        sync_inst_norm = sync_inst / sync_inst_max
 
-        # Plot all metrics
-        ax.plot(t, mean_activation, label="Mean Activation", linewidth=2, color="blue")
+        # Normalize derivative to 0-1 range (center at 0.5)
+        deriv_max = np.max(np.abs(deriv)) if np.max(np.abs(deriv)) > 0 else 1
+        deriv_norm = (deriv / deriv_max) * 0.5 + 0.5  # Maps [-1,1] to [0,1]
+
+        # Plot all metrics with distinct solid colors
+        ax.plot(
+            t, mean_activation, label="Mean Activation", linewidth=2.5, color="#1f77b4"
+        )  # blue
         ax.plot(
             t,
-            var_normalized,
-            label=f"Variance (norm, max={var_max:.4f})",
+            sync_win_norm,
+            label=f"Windowed Sync (w={window_size})",
             linewidth=1.5,
-            color="orange",
-            linestyle="--",
-        )
+            color="#ff7f0e",
+        )  # orange
         ax.plot(
             t,
-            sync_normalized,
-            label=f"Sync (norm, max={sync_max:.3f})",
+            sync_inst_norm,
+            label="Instant Sync (no window)",
             linewidth=1.5,
-            color="green",
-            linestyle="-.",
-        )
+            color="#2ca02c",
+        )  # green
         ax.plot(
             t,
             (coherence + 1) / 2,
-            label="Correlation (scaled 0-1)",
+            label="Correlation (scaled)",
             linewidth=1.5,
-            color="red",
-            alpha=0.7,
-        )
-        ax.plot(t, inv_mse, label="Inv MSE (sameness)", linewidth=2, color="purple")
+            color="#d62728",
+        )  # red
+        ax.plot(t, inv_mse, label="Inv MSE", linewidth=1.5, color="#9467bd")  # purple
+        ax.plot(
+            t,
+            deriv_norm,
+            label="Derivative (centered)",
+            linewidth=1.5,
+            color="#8c564b",
+            alpha=0.8,
+        )  # brown
+
+        # Add zero line for derivative reference
+        ax.axhline(y=0.5, color="#8c564b", linestyle=":", alpha=0.3, linewidth=1)
 
         ax.set_xlabel("Time Step")
         ax.set_ylabel("Value (normalized to 0-1)")
-        ax.set_title(
-            f"Cluster {cluster_id} ({len(members)} neurons) - All Metrics Overlaid"
-        )
-        ax.set_ylim(-0.1, 1.1)
-        ax.legend(loc="upper right", fontsize=8)
+        ax.set_title(f"Cluster {cluster_id} ({len(members)} neurons) - All Metrics")
+        ax.set_ylim(-0.05, 1.05)
+        ax.legend(loc="upper right", fontsize=7, ncol=2)
         ax.grid(True, alpha=0.3)
 
     # Hide unused axes
@@ -1176,7 +1258,7 @@ def plot_cluster_metrics_overlaid(
         axes[idx].set_visible(False)
 
     fig.suptitle(
-        f"All Cluster Metrics Overlaid (window={window_size})", fontsize=14, y=1.02
+        f"Cluster Metrics Overlaid | Instant Sync = no window lag", fontsize=14, y=1.02
     )
     plt.tight_layout()
     plt.show()
