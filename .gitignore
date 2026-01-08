@@ -1,0 +1,17 @@
+.D
+.DS_Store
+.vscode
+.pytest_cache
+*.pkl
+*.mid
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.m4a
+*.m4b
+*.m4p
+*.m4v
+*.m4b
+*.m4p
+*.m4v

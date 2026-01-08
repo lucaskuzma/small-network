@@ -1442,68 +1442,181 @@ thresholds = find_threshold(history, percentile=0.80, key=key, per_channel=True)
 print(f"Thresholds (per cluster): {thresholds}")
 play_neural_outputs_live(history, tempo=60, threshold=thresholds, key=key)
 
-# %%
-# note number is neurons as 16 bit integer
+# %% ================================ pickle
 
-import pygame
-import numpy as np
-import time
+import datetime
+import pickle
 
-volume = 0.5
+# save history to pickle
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
+# save all weights and initial parameters to pickle
+params = {
+    "network": network,
+    "network_weights": network.state.network_weights,
+    "output_weights": network.state.output_weights,
+    "thresholds": network.state.thresholds,
+    "thresholds_current": network.state.thresholds_current,
+    "threshold_variation_ranges": network.state.threshold_variation_ranges,
+    "threshold_variation_periods": network.state.threshold_variation_periods,
+    "history": history,
+}
+with open(f"weights_{timestamp}.pkl", "wb") as f:
+    pickle.dump(params, f)
 
-def play_neural_outputs_live(history, tempo=120, threshold=0.298):
-    """Play neural network outputs as audio in real-time"""
-    pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
-    pygame.init()
+# load history from pickle
+# with open("history.pkl", "rb") as f:
+#     history = pickle.load(f)
 
-    # Map each neuron to a different frequency
-    base_freq = 110  # A2
-    freq_ratio = 2 ** (1 / 12)  # Semitone ratio
-
-    # Calculate time per step
-    step_duration = 60.0 / tempo / 4  # Assuming 16th notes
-
-    for step, outputs in enumerate(history["outputs"]):
-        wave = np.zeros(int(44100 * step_duration))
-
-        # make binary digits from outputs
-        binary_digits = list(map(lambda x: 1 if x > threshold else 0, outputs))
-
-        # truncate binary digits to 2^7 bits
-        binary_digits = binary_digits[: 2**7]
-        if len(binary_digits) < 2**7:
-            binary_digits.extend([0] * (2**7 - len(binary_digits)))
-
-        # convert binary digits to integer
-        note_number = int("".join(map(str, binary_digits)), 2)
-
-        if note_number > 0:
-            # map note number to frequency
-            frequency = base_freq * (freq_ratio ** (note_number % 24))
-
-            # generate sine wave
-            t = np.linspace(0, step_duration, len(wave))
-            wave = np.sin(2 * np.pi * frequency * t)
-
-            # fade out over duration
-            wave *= np.linspace(1, 0, len(t))
-
-        audio = (wave * 32767 * volume).astype(np.int16)
-
-        # play the wave for this time step
-        sound = pygame.sndarray.make_sound(audio)
-        sound.play()
-
-        time.sleep(step_duration)
+# %% ================================ MIDI
 
 
-play_neural_outputs_live(history, tempo=90)
+def save_neural_outputs_as_midi(
+    history,
+    filename="neural_output.mid",
+    tempo=120,
+    threshold=0.5,
+    key="clusters",
+):
+    """
+    Save neural network outputs as MIDI file.
+    All clusters on one channel, differentiated by pitch.
+    Uses 16th notes for timing, following the mapping from play_neural_outputs_live.
 
-# %%
+    Args:
+        history: dict containing time series data
+        filename: output MIDI filename
+        tempo: beats per minute
+        threshold: single float or array of thresholds (one per cluster)
+        key: which data to use from history
+    """
+    from mido import Message, MidiFile, MidiTrack, MetaMessage
 
-# import sys
-# print(sys.executable)
-# !{sys.executable} -m pip install pygame
+    # Create MIDI file with timing resolution
+    mid = MidiFile()
+    ticks_per_beat = 480  # Standard MIDI resolution
+    mid.ticks_per_beat = ticks_per_beat
 
-# !pip install "scipy>=1.7.0"
+    # Create single track
+    track = MidiTrack()
+    mid.tracks.append(track)
+
+    # Add metadata
+    track.append(MetaMessage("track_name", name="Neural Output", time=0))
+    microseconds_per_beat = int(60_000_000 / tempo)
+    track.append(MetaMessage("set_tempo", tempo=microseconds_per_beat, time=0))
+
+    # Map to major scale (same as play_neural_outputs_live)
+    major_scale = [0, 2, 4, 5, 7, 9, 11]
+    base_note = 57  # A3 in MIDI
+
+    # Calculate ticks per 16th note
+    ticks_per_16th = ticks_per_beat // 4
+
+    # Convert threshold to array if needed
+    threshold_array = np.atleast_1d(threshold)
+
+    # Get data
+    data = np.array(history[key])  # (T, num_clusters)
+    num_clusters = data.shape[1]
+
+    # Track active notes for each cluster
+    active_notes = {}  # {cluster_idx: (note, start_time)}
+
+    # Track absolute time for delta calculation
+    current_absolute_time = 0
+
+    # Process each timestep
+    for step_idx, outputs in enumerate(data):
+        step_time = step_idx * ticks_per_16th
+
+        for cluster_idx, output_value in enumerate(outputs):
+            # Get threshold for this cluster
+            thresh = (
+                threshold_array[cluster_idx]
+                if cluster_idx < len(threshold_array)
+                else threshold_array[0]
+            )
+
+            # Map cluster index to MIDI note (same mapping as play_neural_outputs_live)
+            note = base_note + major_scale[cluster_idx % len(major_scale)]
+
+            # MIDI velocity based on output value (scaled to 1-127)
+            velocity = int(np.clip(output_value * 127, 1, 127))
+
+            # Check if note should be active
+            is_active = output_value > thresh
+
+            # Handle note on/off
+            if is_active and cluster_idx not in active_notes:
+                # Start new note
+                delta = step_time - current_absolute_time
+                track.append(
+                    Message(
+                        "note_on", note=note, velocity=velocity, time=delta, channel=0
+                    )
+                )
+                current_absolute_time = step_time
+                active_notes[cluster_idx] = note
+
+            elif not is_active and cluster_idx in active_notes:
+                # End active note
+                note_to_end = active_notes[cluster_idx]
+                delta = step_time - current_absolute_time
+                track.append(
+                    Message(
+                        "note_off", note=note_to_end, velocity=0, time=delta, channel=0
+                    )
+                )
+                current_absolute_time = step_time
+                del active_notes[cluster_idx]
+
+    # End any remaining active notes
+    final_time = len(data) * ticks_per_16th
+    for cluster_idx, note in active_notes.items():
+        delta = final_time - current_absolute_time
+        track.append(Message("note_off", note=note, velocity=0, time=delta, channel=0))
+        current_absolute_time = final_time
+
+    # Add end of track message
+    track.append(MetaMessage("end_of_track", time=0))
+
+    # Save MIDI file
+    mid.save(filename)
+    print(f"MIDI file saved to: {filename}")
+    print(f"  Tempo: {tempo} BPM")
+    print(f"  Duration: {len(data)} steps ({len(data) * ticks_per_16th} ticks)")
+    print(f"  Clusters: {num_clusters} (all on channel 0)")
+    print(f"  Resolution: 16th notes ({ticks_per_16th} ticks per 16th)")
+
+    return filename
+
+
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+filename = f"neural_output_{timestamp}.mid"
+save_neural_outputs_as_midi(
+    history, filename=filename, tempo=60, threshold=thresholds, key=key
+)
+
+# %% ================================ play MIDI
+
+
+def play_midi(filename):
+    """
+    Play MIDI file using pygame.
+
+    Args:
+        filename: path to MIDI file
+    """
+    import pygame
+
+    pygame.mixer.init()
+    pygame.mixer.music.load(filename)
+    pygame.mixer.music.play()
+
+    print(f"Playing: {filename}")
+    print("Press Ctrl+C to stop...")
+
+    # Wait for playback to finish
+    while pygame.mixer.music.get_busy():
+        pygame.time.Clock().tick(10)
