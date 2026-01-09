@@ -86,7 +86,6 @@ for r in range(NUM_READOUTS):
 axes[-1].set_xlabel("Time Step")
 fig.suptitle("Output Activations by Readout (Voice)", fontsize=14, y=1.02)
 plt.tight_layout()
-plt.savefig("output_readouts.png", dpi=150, bbox_inches="tight")
 plt.show()
 
 # %%
@@ -153,7 +152,6 @@ ax.legend()
 ax.grid(True, alpha=0.3, axis="y")
 
 plt.tight_layout()
-plt.savefig("output_summary.png", dpi=150, bbox_inches="tight")
 plt.show()
 
 # %%
