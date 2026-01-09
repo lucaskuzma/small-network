@@ -178,6 +178,36 @@ class NeuralNetwork:
 
         return most_weighted_neuron
 
+    def manual_activate_most_weighted_per_module(self, value: float):
+        """Activate the most connected neuron in each module.
+
+        Requires randomize_modular_weights() to have been called first.
+        """
+        if not hasattr(self, "module_assignments"):
+            raise ValueError(
+                "No module assignments found. Call randomize_modular_weights() first."
+            )
+
+        total_network_weights = np.sum(self.state.network_weights, axis=1)
+        activated = []
+
+        for m in range(int(np.max(self.module_assignments)) + 1):
+            # Get neurons in this module
+            module_neurons = np.where(self.module_assignments == m)[0]
+
+            # Find most weighted neuron within this module
+            module_weights = total_network_weights[module_neurons]
+            best_idx = np.argmax(module_weights)
+            best_neuron = module_neurons[best_idx]
+
+            self.manual_activate(best_neuron, value)
+            activated.append(best_neuron)
+            print(
+                f"Module {m}: activated neuron {best_neuron} (weight: {total_network_weights[best_neuron]:.3f})"
+            )
+
+        return activated
+
     def clear_firing(self):
         """Clear all firing states and outputs."""
         self.state.firing = np.zeros(self.state.num_neurons, dtype=bool)
@@ -231,6 +261,66 @@ class NeuralNetwork:
             < sparsity
         )
         self.state.network_weights *= mask
+
+    def randomize_modular_weights(
+        self, n_modules=4, intra_sparsity=0.3, inter_sparsity=0.02, scale=0.4
+    ):
+        """Randomize weights with modular/block structure.
+
+        Creates n_modules groups of neurons with high intra-module connectivity
+        and low inter-module connectivity. This encourages independent clusters.
+
+        Args:
+            n_modules: Number of modules to create
+            intra_sparsity: Fraction of connections within each module (0-1)
+            inter_sparsity: Fraction of connections between modules (0-1)
+            scale: Standard deviation of the gaussian distribution
+        """
+        N = self.state.num_neurons
+        module_size = N // n_modules
+
+        # Gaussian weights, clipped to [-1, 1]
+        self.state.network_weights = np.clip(np.random.randn(N, N) * scale, -1, 1)
+
+        # Build sparsity mask with block structure
+        mask = np.zeros((N, N))
+
+        for m in range(n_modules):
+            start = m * module_size
+            # Handle last module getting any remainder neurons
+            end = (m + 1) * module_size if m < n_modules - 1 else N
+
+            # Intra-module connections (dense)
+            intra_mask = np.random.random((end - start, end - start)) < intra_sparsity
+            mask[start:end, start:end] = intra_mask
+
+            # Inter-module connections (sparse)
+            for m2 in range(n_modules):
+                if m2 != m:
+                    start2 = m2 * module_size
+                    end2 = (m2 + 1) * module_size if m2 < n_modules - 1 else N
+                    inter_mask = (
+                        np.random.random((end - start, end2 - start2)) < inter_sparsity
+                    )
+                    mask[start:end, start2:end2] = inter_mask
+
+        self.state.network_weights *= mask
+
+        # Store module assignments for reference
+        self.module_assignments = np.zeros(N, dtype=int)
+        for m in range(n_modules):
+            start = m * module_size
+            end = (m + 1) * module_size if m < n_modules - 1 else N
+            self.module_assignments[start:end] = m
+
+        print(
+            f"Created {n_modules} modules: intra={intra_sparsity:.0%}, inter={inter_sparsity:.0%}"
+        )
+        for m in range(n_modules):
+            count = np.sum(self.module_assignments == m)
+            print(
+                f"  Module {m}: neurons {np.where(self.module_assignments == m)[0][0]}-{np.where(self.module_assignments == m)[0][-1]} ({count} neurons)"
+            )
 
     def get_spectral_radius(self) -> float:
         """Calculate the spectral radius (largest absolute eigenvalue) of the weight matrix."""
@@ -373,7 +463,15 @@ warmup = steps // 8  # 32 steps - ignore initial transient for sync calculation
 network.clear()
 network.set_output_identity()
 
-network.randomize_weights(sparsity=0.1, scale=0.4)
+# Modular weight structure: 4 modules with high intra, low inter connectivity
+n_modules = 4
+network.randomize_modular_weights(
+    n_modules=n_modules,
+    intra_sparsity=0.25,  # 25% connections within modules
+    inter_sparsity=0.05,  # 2% connections between modules
+    scale=0.4,
+)
+# network.randomize_weights(sparsity=0.1, scale=0.4)  # original random weights
 network.randomize_output_weights(sparsity=0.1, scale=0.2)
 # network.sinusoidal_weights()
 network.randomize_thresholds()
@@ -401,8 +499,8 @@ network.randomize_threshold_variations(range=0.0, period=0)
 
 history = {"activations": [], "firing": [], "outputs": [], "thresholds": [], "step": []}
 
-# run simulation
-network.manual_activate_most_weighted(1.0)
+# run simulation - activate most connected neuron in each module
+network.manual_activate_most_weighted_per_module(1.0)
 for step in range(steps):
     # for i, pattern in enumerate(stimulators):
     #     network.manual_activate(i, pattern[step % len(pattern)] * stimulator_strength)
