@@ -56,11 +56,17 @@ class NeuralNetwork:
     def __init__(
         self,
         num_neurons: int = 64,
+        num_outputs: Optional[int] = None,
         num_readouts: int = 1,
         n_outputs_per_readout: int = 12,
         initial_state: Optional[NeuralNetworkState] = None,
     ):
         if initial_state is None:
+            # Backward compatibility: if num_outputs is specified, use it directly
+            if num_outputs is not None:
+                num_readouts = 1
+                n_outputs_per_readout = num_outputs
+
             self.state = NeuralNetworkState(
                 num_neurons=num_neurons,
                 num_readouts=num_readouts,
