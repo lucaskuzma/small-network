@@ -8,7 +8,9 @@ import numpy as np
 @dataclass
 class NeuralNetworkState:
     num_neurons: int = 16
-    num_outputs: int = 16
+    num_readouts: int = 1  # Number of readout voices
+    n_outputs_per_readout: int = 12  # Chromatic scale per readout
+    num_outputs: int = field(init=False)  # Calculated from readouts
     network_weights: np.ndarray = field(init=False)
     thresholds: np.ndarray = field(init=False)
     thresholds_current: np.ndarray = field(init=False)
@@ -28,6 +30,8 @@ class NeuralNetworkState:
     use_tanh_activation: bool = False
 
     def __post_init__(self):
+        self.num_outputs = self.num_readouts * self.n_outputs_per_readout
+
         self.network_weights = np.zeros((self.num_neurons, self.num_neurons))
         self.thresholds = np.full((self.num_neurons,), 0.5)
         self.thresholds_current = np.full((self.num_neurons,), 0.5)
@@ -43,23 +47,31 @@ class NeuralNetworkState:
         self.outputs = np.zeros(self.num_outputs)
         self.refractory_counters = np.zeros(self.num_neurons, dtype=int)
 
+    def get_readout_outputs(self) -> np.ndarray:
+        """Return outputs reshaped as (num_readouts, n_outputs_per_readout)."""
+        return self.outputs.reshape(self.num_readouts, self.n_outputs_per_readout)
+
 
 class NeuralNetwork:
     def __init__(
         self,
         num_neurons: int = 64,
-        num_outputs: Optional[int] = None,
+        num_readouts: int = 1,
+        n_outputs_per_readout: int = 12,
         initial_state: Optional[NeuralNetworkState] = None,
     ):
         if initial_state is None:
-            # Default num_outputs to num_neurons if not specified
-            if num_outputs is None:
-                num_outputs = num_neurons
             self.state = NeuralNetworkState(
-                num_neurons=num_neurons, num_outputs=num_outputs
+                num_neurons=num_neurons,
+                num_readouts=num_readouts,
+                n_outputs_per_readout=n_outputs_per_readout,
             )
         else:
             self.state = initial_state
+
+    def get_readout_outputs(self) -> np.ndarray:
+        """Return outputs reshaped as (num_readouts, n_outputs_per_readout)."""
+        return self.state.get_readout_outputs()
 
     def tick(self, step: int):
         # Calculate new activations from current firing neurons
@@ -363,7 +375,9 @@ class NeuralNetwork:
 
     def clear(self):
         self.state = NeuralNetworkState(
-            num_neurons=self.state.num_neurons, num_outputs=self.state.num_outputs
+            num_neurons=self.state.num_neurons,
+            num_readouts=self.state.num_readouts,
+            n_outputs_per_readout=self.state.n_outputs_per_readout,
         )
 
     def set_output_identity(self):
