@@ -363,8 +363,13 @@ def plot_neural_heatmap(history, data_type="activations", num_neurons=64):
 
 # =======================================================================
 
+# Random seed for reproducibility
+RANDOM_SEED = 42
+np.random.seed(RANDOM_SEED)
+
 network = NeuralNetwork(num_neurons=256, num_outputs=8)
 steps = 256
+warmup = steps // 8  # 32 steps - ignore initial transient for sync calculation
 network.clear()
 network.set_output_identity()
 
@@ -420,17 +425,21 @@ plot_neural_heatmap(history, "outputs", network.state.num_outputs)
 # S^t = Z^t · (Z^t)^T where Z^t is the history of activations up to time t
 
 
-def compute_synchronization_over_time(history, data_type="activations"):
+def compute_synchronization_over_time(history, data_type="activations", warmup=0):
     """
     Compute synchronization matrix at each time step.
     Returns a list of (D×D) synchronization matrices, one per time step.
+
+    warmup: number of initial timesteps to ignore (ESN-style washout)
+            Helps avoid initial transient spikes dominating the sync calculation.
     """
     activations = np.array(history[data_type])  # (T, D)
     T, D = activations.shape
 
     sync_matrices = []
     for t in range(1, T + 1):
-        Z_t = activations[:t, :].T  # (D, t) - history up to time t
+        start = min(warmup, t - 1)  # Don't start beyond current time
+        Z_t = activations[start:t, :].T  # (D, t-start) - history after warmup
         S_t = Z_t @ Z_t.T  # (D, D) - synchronization matrix
         sync_matrices.append(S_t)
 
@@ -1264,8 +1273,9 @@ def plot_cluster_metrics_overlaid(
     plt.show()
 
 
-# Compute synchronization from activation history
-sync_matrices = compute_synchronization_over_time(history, "activations")
+# Compute synchronization from activation history (with warmup to ignore initial transient)
+sync_matrices = compute_synchronization_over_time(history, "activations", warmup=warmup)
+print(f"Sync computation using warmup={warmup} steps (ignoring initial transient)")
 
 # Plot final synchronization matrix
 plot_synchronization_matrix(
