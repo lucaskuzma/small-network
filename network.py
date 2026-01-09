@@ -464,14 +464,14 @@ network.clear()
 network.set_output_identity()
 
 # Modular weight structure: 4 modules with high intra, low inter connectivity
-n_modules = 4
-network.randomize_modular_weights(
-    n_modules=n_modules,
-    intra_sparsity=0.25,  # 25% connections within modules
-    inter_sparsity=0.05,  # 2% connections between modules
-    scale=0.4,
-)
-# network.randomize_weights(sparsity=0.1, scale=0.4)  # original random weights
+# n_modules = 4
+# network.randomize_modular_weights(
+#     n_modules=n_modules,
+#     intra_sparsity=0.25,  # 25% connections within modules
+#     inter_sparsity=0.05,  # 2% connections between modules
+#     scale=0.4,
+# )
+network.randomize_weights(sparsity=0.1, scale=0.4)  # original random weights
 network.randomize_output_weights(sparsity=0.1, scale=0.2)
 # network.sinusoidal_weights()
 network.randomize_thresholds()
@@ -500,7 +500,9 @@ network.randomize_threshold_variations(range=0.0, period=0)
 history = {"activations": [], "firing": [], "outputs": [], "thresholds": [], "step": []}
 
 # run simulation - activate most connected neuron in each module
-network.manual_activate_most_weighted_per_module(1.0)
+# network.manual_activate_most_weighted_per_module(1.0)
+network.manual_activate_most_weighted(1.0)
+
 for step in range(steps):
     # for i, pattern in enumerate(stimulators):
     #     network.manual_activate(i, pattern[step % len(pattern)] * stimulator_strength)
