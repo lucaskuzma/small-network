@@ -235,7 +235,7 @@ from datetime import datetime
 from utils_sonic import save_readout_outputs_as_midi
 
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-midi_filename = f"neural_output_{timestamp}.mid"
+midi_filename = f"midi/neural_output_{timestamp}.mid"
 
 # Use the same thresholds and settings as playback
 save_readout_outputs_as_midi(
@@ -247,3 +247,149 @@ save_readout_outputs_as_midi(
 )
 
 # %%
+# Evaluate MIDI file and plot metrics
+from eval_ambient import evaluate_ambient
+from dataclasses import asdict
+
+metrics_obj = evaluate_ambient(midi_filename)
+print(metrics_obj)
+
+# Convert to dict for plotting (exclude non-metric fields)
+metrics_dict = asdict(metrics_obj)
+
+# Remove non-numeric/non-plottable fields
+exclude_fields = ["best_scale", "best_root", "pitch_vocabulary", "composite_score"]
+plot_metrics = {k: v for k, v in metrics_dict.items() if k not in exclude_fields}
+
+# Plot individual metrics and composite score
+fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+
+# Individual metrics
+axes[0].bar(range(len(plot_metrics)), list(plot_metrics.values()))
+axes[0].set_xticks(range(len(plot_metrics)))
+axes[0].set_xticklabels(plot_metrics.keys(), rotation=45, ha="right")
+axes[0].set_ylim(0, 1)
+axes[0].set_ylabel("Score")
+axes[0].set_title("Individual Ambient Metrics")
+axes[0].grid(True, alpha=0.3, axis="y")
+
+# Composite score
+axes[1].bar(["Composite"], [metrics_obj.composite_score], color="green", width=0.5)
+axes[1].set_ylim(0, 1)
+axes[1].set_ylabel("Score")
+axes[1].set_title(f"Overall Score: {metrics_obj.composite_score:.3f}")
+axes[1].grid(True, alpha=0.3, axis="y")
+
+plt.tight_layout()
+plt.show()
+
+# %%
+# Compare metrics across all MIDI files in folder
+import glob
+import os
+
+midi_files = sorted(glob.glob("midi/*.mid"))
+all_metrics = []
+filenames = []
+
+for mf in midi_files:
+    try:
+        m = evaluate_ambient(mf)
+        all_metrics.append(m)
+        filenames.append(os.path.basename(mf))
+    except Exception as e:
+        print(f"Error analyzing {mf}: {e}")
+
+if all_metrics:
+    # Extract metric names (excluding non-plottable fields)
+    exclude_fields = ["best_scale", "best_root", "pitch_vocabulary"]
+    metric_names = [k for k in asdict(all_metrics[0]).keys() if k not in exclude_fields]
+
+    # Create comparison plot
+    fig, ax = plt.subplots(figsize=(16, 8))
+
+    x = np.arange(len(filenames))
+    width = 0.8 / len(metric_names)
+
+    # Color neural outputs differently
+    colors = plt.cm.tab20(np.linspace(0, 1, len(metric_names)))
+
+    for i, metric_name in enumerate(metric_names):
+        values = [getattr(m, metric_name) for m in all_metrics]
+        offset = (i - len(metric_names) / 2) * width
+        ax.bar(x + offset, values, width, label=metric_name, alpha=0.8, color=colors[i])
+
+    ax.set_xlabel("MIDI File")
+    ax.set_ylabel("Score")
+    ax.set_title("Ambient Metrics Comparison")
+    ax.set_xticks(x)
+    ax.set_xticklabels(filenames, rotation=45, ha="right", fontsize=8)
+    ax.legend(loc="upper left", bbox_to_anchor=(1, 1), ncol=1)
+    ax.set_ylim(0, 1)
+    ax.grid(True, alpha=0.3, axis="y")
+
+    # Highlight neural outputs with background color
+    for i, fn in enumerate(filenames):
+        if "neural_output" in fn:
+            ax.axvspan(i - 0.5, i + 0.5, alpha=0.1, color="red")
+
+    plt.tight_layout()
+    plt.show()
+
+    # Plot composite scores comparison
+    fig, ax = plt.subplots(figsize=(14, 6))
+
+    composite_scores = [m.composite_score for m in all_metrics]
+    colors_composite = [
+        "red" if "neural_output" in fn else "steelblue" for fn in filenames
+    ]
+
+    bars = ax.bar(
+        range(len(filenames)), composite_scores, color=colors_composite, alpha=0.7
+    )
+    ax.set_xlabel("MIDI File")
+    ax.set_ylabel("Composite Score")
+    ax.set_title("Composite Ambient Score Comparison (Red = Neural Network)")
+    ax.set_xticks(range(len(filenames)))
+    ax.set_xticklabels(filenames, rotation=45, ha="right", fontsize=8)
+    ax.set_ylim(0, 1)
+    ax.grid(True, alpha=0.3, axis="y")
+
+    # Add mean line for benchmark (non-neural) files
+    benchmark_scores = [
+        s for i, s in enumerate(composite_scores) if "neural_output" not in filenames[i]
+    ]
+    if benchmark_scores:
+        mean_benchmark = np.mean(benchmark_scores)
+        ax.axhline(
+            mean_benchmark,
+            color="green",
+            linestyle="--",
+            linewidth=2,
+            label=f"Benchmark Mean: {mean_benchmark:.3f}",
+        )
+        ax.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+    # Print summary statistics
+    print("\n=== Summary Statistics ===")
+    print(f"Benchmark files (Dark Ambient Piano):")
+    print(f"  Count: {len(benchmark_scores)}")
+    print(f"  Mean: {np.mean(benchmark_scores):.3f}")
+    print(f"  Std: {np.std(benchmark_scores):.3f}")
+    print(f"  Range: {np.min(benchmark_scores):.3f} - {np.max(benchmark_scores):.3f}")
+
+    neural_scores = [
+        s for i, s in enumerate(composite_scores) if "neural_output" in filenames[i]
+    ]
+    if neural_scores:
+        print(f"\nNeural network outputs:")
+        print(f"  Count: {len(neural_scores)}")
+        print(f"  Mean: {np.mean(neural_scores):.3f}")
+        print(f"  Std: {np.std(neural_scores):.3f}")
+        print(f"  Range: {np.min(neural_scores):.3f} - {np.max(neural_scores):.3f}")
+        print(
+            f"  Gap from benchmark: {np.mean(benchmark_scores) - np.mean(neural_scores):.3f}"
+        )
