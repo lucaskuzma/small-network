@@ -408,22 +408,79 @@ def evaluate_ambient(midi_path: str, **kwargs) -> AmbientMetrics:
     return analyzer.analyze(midi_path)
 
 
+def print_summary_table(results: List[Tuple[str, AmbientMetrics]]):
+    """Print a summary table of all analyzed files."""
+    import os
+
+    root_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+    print("\n" + "=" * 120)
+    print("SUMMARY TABLE")
+    print("=" * 120)
+
+    # Header
+    print(
+        f"{'File':<40} {'Composite':>9} {'Modal':>7} {'Vocab':>7} {'Stasis':>7} "
+        f"{'Conson':>7} {'Sparse':>7} {'Cadence':>7} {'Scale':<15}"
+    )
+    print("-" * 120)
+
+    # Rows
+    for filepath, metrics in results:
+        filename = os.path.basename(filepath)
+        if len(filename) > 37:
+            filename = filename[:34] + "..."
+
+        scale_str = f"{root_names[metrics.best_root]} {metrics.best_scale}"
+        if len(scale_str) > 15:
+            scale_str = scale_str[:12] + "..."
+
+        print(
+            f"{filename:<40} {metrics.composite_score:>9.3f} {metrics.modal_consistency:>7.3f} "
+            f"{metrics.pitch_vocabulary_score:>7.3f} {metrics.voice_stasis:>7.3f} "
+            f"{metrics.consonance:>7.3f} {metrics.sparsity:>7.3f} "
+            f"{metrics.cadence_penalty:>7.3f} {scale_str:<15}"
+        )
+
+    print("=" * 120)
+
+    # Statistics
+    if len(results) > 1:
+        composites = [m.composite_score for _, m in results]
+        print(f"\nStatistics:")
+        print(f"  Mean composite score: {np.mean(composites):.3f}")
+        print(f"  Std dev:              {np.std(composites):.3f}")
+        print(f"  Min:                  {np.min(composites):.3f}")
+        print(f"  Max:                  {np.max(composites):.3f}")
+        print()
+
+
 if __name__ == "__main__":
     import sys
     import glob
+    import os
 
     if len(sys.argv) < 2:
         # Default: analyze any MIDI files in current directory
         midi_files = glob.glob("*.mid") + glob.glob("*.midi")
     else:
-        midi_files = sys.argv[1:]
+        # Check if argument is a directory
+        if len(sys.argv) == 2 and os.path.isdir(sys.argv[1]):
+            dir_path = sys.argv[1]
+            midi_files = glob.glob(os.path.join(dir_path, "*.mid")) + glob.glob(
+                os.path.join(dir_path, "*.midi")
+            )
+        else:
+            midi_files = sys.argv[1:]
 
     if not midi_files:
         print("Usage: python eval_ambient.py <midi_file> [midi_file2 ...]")
+        print("       python eval_ambient.py <directory>")
         print("       or place .mid files in current directory")
         sys.exit(1)
 
     analyzer = AmbientAnalyzer()
+    results = []
 
     for midi_path in midi_files:
         print(f"\n{'='*60}")
@@ -432,6 +489,10 @@ if __name__ == "__main__":
         try:
             metrics = analyzer.analyze(midi_path)
             print(metrics)
+            results.append((midi_path, metrics))
         except Exception as e:
             print(f"Error: {e}")
 
+    # Print summary table if multiple files
+    if len(results) > 1:
+        print_summary_table(results)
