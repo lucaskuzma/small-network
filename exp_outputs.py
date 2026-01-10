@@ -10,6 +10,9 @@ from network import NeuralNetwork
 
 # %%
 # Configuration
+RANDOM_SEED = 42
+np.random.seed(RANDOM_SEED)
+
 NUM_NEURONS = 256
 NUM_READOUTS = 4
 N_OUTPUTS_PER_READOUT = 12
@@ -166,3 +169,64 @@ for r in range(NUM_READOUTS):
     print(
         f"Voice {r + 1}: total={total:.1f}, peak={peak:.2f}, active_steps={active_steps}, favorite_note={most_active_note}"
     )
+
+# %%
+# Sonification - live audio playback
+import pygame
+import time
+
+percentile = 95
+
+pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
+pygame.init()
+
+# Compute threshold per voice (top 20% of activations)
+voice_thresholds = np.zeros(NUM_READOUTS)
+for r in range(NUM_READOUTS):
+    voice_data = output_history[:, r, :]  # (T, 12)
+    voice_thresholds[r] = np.percentile(voice_data, percentile)
+print(f"Voice thresholds {percentile}th percentile: {voice_thresholds}")
+
+# Each voice gets its own octave
+# Voice 0 = C3 (MIDI 48), Voice 1 = C4 (MIDI 60), etc.
+base_notes = [48, 60, 72, 84]  # C3, C4, C5, C6
+
+tempo = 60
+step_duration = 60.0 / tempo / 4  # 16th notes
+
+print(f"Playing {SIM_STEPS} steps at {tempo} BPM...")
+
+for step in range(SIM_STEPS):
+    mixed_audio = np.zeros(int(44100 * step_duration))
+
+    for voice in range(NUM_READOUTS):
+        for note_idx in range(N_OUTPUTS_PER_READOUT):
+            activation = output_history[step, voice, note_idx]
+
+            if activation > voice_thresholds[voice]:
+                # MIDI note = base octave + semitone offset
+                midi_note = base_notes[voice] + note_idx
+                frequency = 440 * (2 ** ((midi_note - 69) / 12))
+
+                # Generate sine wave
+                t = np.linspace(0, step_duration, len(mixed_audio))
+                wave = np.sin(2 * np.pi * frequency * t) * activation
+
+                # Fade out
+                wave *= np.linspace(1, 0, len(t))
+
+                mixed_audio += wave
+
+    # Normalize and play
+    if np.max(np.abs(mixed_audio)) > 0:
+        mixed_audio = mixed_audio / np.max(np.abs(mixed_audio)) * 0.8
+    audio = (mixed_audio * 32767).astype(np.int16)
+
+    sound = pygame.sndarray.make_sound(audio)
+    sound.play()
+
+    time.sleep(step_duration)
+
+print("Playback complete.")
+
+# %%
