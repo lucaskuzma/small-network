@@ -240,6 +240,159 @@ def save_neural_outputs_as_midi(
     return filename
 
 
+def save_readout_outputs_as_midi(
+    output_history,
+    filename="neural_output.mid",
+    tempo=120,
+    threshold=0.5,
+    base_notes=None,
+):
+    """
+    Save neural network readout outputs as MIDI file.
+    Each readout (voice) on a separate track, chromatic pitch classes (0-11).
+    
+    Args:
+        output_history: numpy array of shape (T, num_readouts, 12) or (T, num_readouts, n_pitches)
+        filename: output MIDI filename
+        tempo: beats per minute
+        threshold: single float or array of thresholds (one per readout/voice)
+        base_notes: list of base MIDI notes for each voice (default: [48, 60, 72, 84] = C3, C4, C5, C6)
+    """
+    from mido import Message, MidiFile, MidiTrack, MetaMessage
+
+    # Parse output_history shape
+    if len(output_history.shape) == 3:
+        num_steps, num_readouts, n_pitches = output_history.shape
+    else:
+        raise ValueError(
+            f"output_history must be 3D (steps, readouts, pitches), got shape {output_history.shape}"
+        )
+
+    # Default base notes - each voice gets its own octave
+    if base_notes is None:
+        base_notes = [48, 60, 72, 84]  # C3, C4, C5, C6
+    
+    # Ensure we have enough base notes
+    while len(base_notes) < num_readouts:
+        base_notes.append(base_notes[-1] + 12)
+
+    # Create MIDI file
+    mid = MidiFile()
+    ticks_per_beat = 480
+    mid.ticks_per_beat = ticks_per_beat
+
+    # Calculate ticks per 16th note
+    ticks_per_16th = ticks_per_beat // 4
+
+    # Convert threshold to array if needed
+    threshold_array = np.atleast_1d(threshold)
+
+    # Create a track for each readout (voice)
+    for readout_idx in range(num_readouts):
+        track = MidiTrack()
+        mid.tracks.append(track)
+
+        # Add metadata
+        track.append(
+            MetaMessage("track_name", name=f"Voice {readout_idx + 1}", time=0)
+        )
+        if readout_idx == 0:
+            # Only first track gets tempo
+            microseconds_per_beat = int(60_000_000 / tempo)
+            track.append(MetaMessage("set_tempo", tempo=microseconds_per_beat, time=0))
+
+        # Get threshold for this readout
+        thresh = (
+            threshold_array[readout_idx]
+            if readout_idx < len(threshold_array)
+            else threshold_array[0]
+        )
+
+        # Get base note for this voice
+        base_note = base_notes[readout_idx]
+
+        # Track active notes for each pitch class in this voice
+        active_notes = {}  # {pitch_class: note}
+        current_absolute_time = 0
+
+        # Process each timestep
+        for step_idx in range(num_steps):
+            step_time = step_idx * ticks_per_16th
+            outputs = output_history[step_idx, readout_idx, :]
+
+            for pitch_class, output_value in enumerate(outputs):
+                # MIDI note = base note + chromatic offset
+                note = base_note + pitch_class
+
+                # MIDI velocity based on output value
+                velocity = int(np.clip(output_value * 127, 1, 127))
+
+                # Check if note should be active
+                is_active = output_value > thresh
+
+                # Handle note on/off
+                if is_active and pitch_class not in active_notes:
+                    # Start new note
+                    delta = step_time - current_absolute_time
+                    track.append(
+                        Message(
+                            "note_on",
+                            note=note,
+                            velocity=velocity,
+                            time=delta,
+                            channel=readout_idx,
+                        )
+                    )
+                    current_absolute_time = step_time
+                    active_notes[pitch_class] = note
+
+                elif not is_active and pitch_class in active_notes:
+                    # End active note
+                    note_to_end = active_notes[pitch_class]
+                    delta = step_time - current_absolute_time
+                    track.append(
+                        Message(
+                            "note_off",
+                            note=note_to_end,
+                            velocity=0,
+                            time=delta,
+                            channel=readout_idx,
+                        )
+                    )
+                    current_absolute_time = step_time
+                    del active_notes[pitch_class]
+
+        # End any remaining active notes
+        final_time = num_steps * ticks_per_16th
+        for pitch_class, note in active_notes.items():
+            delta = final_time - current_absolute_time
+            track.append(
+                Message(
+                    "note_off",
+                    note=note,
+                    velocity=0,
+                    time=delta,
+                    channel=readout_idx,
+                )
+            )
+            current_absolute_time = final_time
+
+        # Add end of track message
+        track.append(MetaMessage("end_of_track", time=0))
+
+    # Save MIDI file
+    mid.save(filename)
+    print(f"MIDI file saved to: {filename}")
+    print(f"  Tempo: {tempo} BPM")
+    print(f"  Duration: {num_steps} steps ({num_steps * ticks_per_16th} ticks)")
+    print(f"  Voices: {num_readouts}")
+    print(f"  Pitch classes per voice: {n_pitches} (chromatic)")
+    print(f"  Base notes: {base_notes[:num_readouts]}")
+    print(f"  Resolution: 16th notes ({ticks_per_16th} ticks per 16th)")
+
+    return filename
+
+
 # =======================================================================
 # MIDI playback
 # =======================================================================

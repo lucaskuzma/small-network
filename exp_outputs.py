@@ -230,3 +230,20 @@ for step in range(SIM_STEPS):
 print("Playback complete.")
 
 # %%
+# Export to MIDI with chromatic outputs
+from datetime import datetime
+from utils_sonic import save_readout_outputs_as_midi
+
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+midi_filename = f"neural_output_{timestamp}.mid"
+
+# Use the same thresholds and settings as playback
+save_readout_outputs_as_midi(
+    output_history,
+    filename=midi_filename,
+    tempo=60,
+    threshold=voice_thresholds,
+    base_notes=[48, 60, 72, 84],  # C3, C4, C5, C6
+)
+
+# %%

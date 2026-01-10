@@ -39,8 +39,12 @@ class AmbientMetrics:
     pitch_vocabulary: int  # number of pitch classes used
     pitch_vocabulary_score: float  # 0-1, penalize too few or too many
     voice_stasis: float  # 0-1, how static the most static voice is
+    melodic_smoothness: float  # 0-1, stepwise motion vs leaps
+    harmonic_rhythm: float  # 0-1, stability of vertical harmony
+    note_duration: float  # 0-1, relative preference for longer notes
     consonance: float  # 0-1, fraction of consonant intervals
     sparsity: float  # 0-1, average fraction of voices silent
+    voice_independence: float  # 0-1, avoid parallel motion
     cadence_penalty: float  # 0-1, penalize V-I motion (1 = no cadences)
     composite_score: float  # weighted combination
 
@@ -52,7 +56,11 @@ class AmbientMetrics:
             f"  modal_consistency: {self.modal_consistency:.3f} ({root_names[self.best_root]} {self.best_scale})\n"
             f"  pitch_vocabulary: {self.pitch_vocabulary} classes (score: {self.pitch_vocabulary_score:.3f})\n"
             f"  voice_stasis: {self.voice_stasis:.3f}\n"
+            f"  melodic_smoothness: {self.melodic_smoothness:.3f}\n"
+            f"  harmonic_rhythm: {self.harmonic_rhythm:.3f}\n"
+            f"  note_duration: {self.note_duration:.3f}\n"
             f"  consonance: {self.consonance:.3f}\n"
+            f"  voice_independence: {self.voice_independence:.3f}\n"
             f"  sparsity: {self.sparsity:.3f}\n"
             f"  cadence_penalty: {self.cadence_penalty:.3f}\n"
             f")"
@@ -75,17 +83,22 @@ class AmbientAnalyzer:
         """
         Args:
             weights: Dict of metric weights for composite score.
-                     Keys: modal, vocabulary, stasis, consonance, sparsity, cadence
+                     Keys: modal, vocabulary, stasis, melodic_smooth, harmonic_rhythm,
+                           note_duration, consonance, independence, sparsity, cadence
             ideal_pitch_classes: (min, max) ideal number of pitch classes
             target_sparsity: Target fraction of voices silent (0-1)
         """
         self.weights = weights or {
-            "modal": 0.25,
-            "vocabulary": 0.15,
-            "stasis": 0.20,
-            "consonance": 0.20,
-            "sparsity": 0.10,
-            "cadence": 0.10,
+            "modal": 0.15,
+            "vocabulary": 0.10,
+            "stasis": 0.15,
+            "melodic_smooth": 0.15,
+            "harmonic_rhythm": 0.15,
+            "note_duration": 0.10,
+            "consonance": 0.10,
+            "independence": 0.05,
+            "sparsity": 0.00,  # Disabled for now - seems buggy
+            "cadence": 0.05,
         }
         self.ideal_pitch_classes = ideal_pitch_classes
         self.target_sparsity = target_sparsity
@@ -337,6 +350,180 @@ class AmbientAnalyzer:
         cadence_rate = cadences / (len(pitches) - 1)
         return 1 - cadence_rate
 
+    def compute_melodic_smoothness(self, notes: List[dict]) -> float:
+        """
+        Measure smoothness of melodic lines per voice.
+        Ambient favors stepwise motion over large leaps.
+
+        Returns: 0-1 (1 = mostly stepwise, 0 = lots of leaps)
+        """
+        voices = self.get_pitches_by_voice(notes)
+
+        if not voices:
+            return 0.5
+
+        smoothness_scores = []
+
+        for voice_notes in voices.values():
+            if len(voice_notes) < 2:
+                continue
+
+            sorted_notes = sorted(voice_notes, key=lambda x: x["start_tick"])
+            intervals = []
+
+            for i in range(1, len(sorted_notes)):
+                interval = abs(sorted_notes[i]["pitch"] - sorted_notes[i - 1]["pitch"])
+                intervals.append(interval)
+
+            if intervals:
+                # Stepwise = 1-2 semitones
+                stepwise = sum(1 for i in intervals if i <= 2)
+                # Large leaps = > 5 semitones
+                large_leaps = sum(1 for i in intervals if i > 5)
+
+                # Score: reward stepwise, penalize leaps
+                score = (stepwise - large_leaps) / len(intervals)
+                smoothness_scores.append(
+                    max(0, min(1, (score + 1) / 2))
+                )  # Scale to 0-1
+
+        return np.mean(smoothness_scores) if smoothness_scores else 0.5
+
+    def compute_harmonic_rhythm(self, notes: List[dict]) -> float:
+        """
+        Measure stability of vertical harmony over time.
+        Ambient has slow harmonic rhythm (chords change infrequently).
+
+        Returns: 0-1 (1 = slow/stable, 0 = rapid changes)
+        """
+        if len(notes) < 2:
+            return 1.0
+
+        onsets = sorted(set(n["start_tick"] for n in notes))
+
+        if len(onsets) < 2:
+            return 1.0
+
+        # Get pitch class set at each onset
+        pc_sets = []
+        for onset in onsets:
+            pcs = set()
+            for n in notes:
+                if n["start_tick"] <= onset < n["end_tick"]:
+                    pcs.add(n["pitch"] % 12)
+                elif n["start_tick"] == onset:
+                    pcs.add(n["pitch"] % 12)
+            if pcs:  # Only add non-empty sets
+                pc_sets.append(frozenset(pcs))
+
+        if len(pc_sets) < 2:
+            return 1.0
+
+        # Count how often the pitch class set changes
+        changes = sum(1 for i in range(1, len(pc_sets)) if pc_sets[i] != pc_sets[i - 1])
+        stability = 1 - (changes / (len(pc_sets) - 1))
+
+        return stability
+
+    def compute_note_duration(self, notes: List[dict]) -> float:
+        """
+        Measure relative note duration (prefer longer notes).
+        Tempo-invariant - just compares distribution.
+
+        Returns: 0-1 (higher = longer average durations)
+        """
+        if not notes:
+            return 0.0
+
+        durations = [n["end_tick"] - n["start_tick"] for n in notes]
+
+        if not durations:
+            return 0.0
+
+        # Use percentiles to avoid tempo dependence
+        median_duration = np.median(durations)
+        max_duration = np.max(durations)
+
+        # Score based on median relative to max
+        # If median is close to max, notes tend to be long
+        if max_duration == 0:
+            return 0.0
+
+        score = median_duration / max_duration
+
+        return score
+
+    def _get_simultaneous_notes(
+        self, voice1_notes: List[dict], voice2_notes: List[dict]
+    ) -> List[Tuple[int, int]]:
+        """
+        Helper: find pairs of pitches that sound simultaneously in two voices.
+        Returns list of (pitch1, pitch2) tuples.
+        """
+        simultaneous = []
+
+        for n1 in voice1_notes:
+            for n2 in voice2_notes:
+                # Check if notes overlap in time
+                overlap = not (
+                    n1["end_tick"] <= n2["start_tick"]
+                    or n2["end_tick"] <= n1["start_tick"]
+                )
+                if overlap:
+                    simultaneous.append((n1["pitch"], n2["pitch"]))
+                    break  # Only count each n1 once
+
+        return simultaneous
+
+    def compute_voice_independence(self, notes: List[dict]) -> float:
+        """
+        Penalize parallel motion between voices (especially fifths/octaves).
+
+        Returns: 0-1 (1 = independent, 0 = lots of parallels)
+        """
+        voices = self.get_pitches_by_voice(notes)
+        voice_list = list(voices.values())
+
+        if len(voice_list) < 2:
+            return 1.0
+
+        total_penalties = 0
+        total_comparisons = 0
+
+        # Check all pairs of voices
+        for i in range(len(voice_list)):
+            for j in range(i + 1, len(voice_list)):
+                voice1 = sorted(voice_list[i], key=lambda x: x["start_tick"])
+                voice2 = sorted(voice_list[j], key=lambda x: x["start_tick"])
+
+                # Build list of intervals at each common timestamp
+                intervals = []
+                for n1 in voice1:
+                    # Find closest n2 that overlaps
+                    for n2 in voice2:
+                        if not (
+                            n1["end_tick"] <= n2["start_tick"]
+                            or n2["end_tick"] <= n1["start_tick"]
+                        ):
+                            interval = (n1["pitch"] - n2["pitch"]) % 12
+                            intervals.append(interval)
+                            break
+
+                # Check for parallel perfect intervals
+                for k in range(1, len(intervals)):
+                    prev_interval = intervals[k - 1]
+                    curr_interval = intervals[k]
+
+                    # Parallel perfect intervals (0=unison, 7=fifth)
+                    if prev_interval == curr_interval and prev_interval in {0, 7}:
+                        total_penalties += 1
+                    total_comparisons += 1
+
+        if total_comparisons == 0:
+            return 1.0
+
+        return 1 - (total_penalties / total_comparisons)
+
     def analyze(self, midi_path: str) -> AmbientMetrics:
         """
         Analyze a MIDI file and return ambient metrics.
@@ -357,8 +544,12 @@ class AmbientAnalyzer:
                 pitch_vocabulary=0,
                 pitch_vocabulary_score=0.0,
                 voice_stasis=0.0,
+                melodic_smoothness=0.0,
+                harmonic_rhythm=0.0,
+                note_duration=0.0,
                 consonance=0.0,
                 sparsity=0.0,
+                voice_independence=0.0,
                 cadence_penalty=0.0,
                 composite_score=0.0,
             )
@@ -369,8 +560,12 @@ class AmbientAnalyzer:
         modal, best_scale, best_root = self.compute_modal_consistency(pitch_classes)
         vocab, vocab_score = self.compute_pitch_vocabulary(pitch_classes)
         stasis = self.compute_voice_stasis(notes)
+        melodic_smooth = self.compute_melodic_smoothness(notes)
+        harmonic_rhythm = self.compute_harmonic_rhythm(notes)
+        note_duration = self.compute_note_duration(notes)
         consonance = self.compute_consonance(notes)
         sparsity = self.compute_sparsity(notes)
+        independence = self.compute_voice_independence(notes)
         cadence = self.compute_cadence_penalty(notes)
 
         # Weighted composite
@@ -378,8 +573,12 @@ class AmbientAnalyzer:
             self.weights["modal"] * modal
             + self.weights["vocabulary"] * vocab_score
             + self.weights["stasis"] * stasis
+            + self.weights["melodic_smooth"] * melodic_smooth
+            + self.weights["harmonic_rhythm"] * harmonic_rhythm
+            + self.weights["note_duration"] * note_duration
             + self.weights["consonance"] * consonance
             + self.weights["sparsity"] * sparsity
+            + self.weights["independence"] * independence
             + self.weights["cadence"] * cadence
         )
 
@@ -390,8 +589,12 @@ class AmbientAnalyzer:
             pitch_vocabulary=vocab,
             pitch_vocabulary_score=vocab_score,
             voice_stasis=stasis,
+            melodic_smoothness=melodic_smooth,
+            harmonic_rhythm=harmonic_rhythm,
+            note_duration=note_duration,
             consonance=consonance,
             sparsity=sparsity,
+            voice_independence=independence,
             cadence_penalty=cadence,
             composite_score=composite,
         )
@@ -414,35 +617,36 @@ def print_summary_table(results: List[Tuple[str, AmbientMetrics]]):
 
     root_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
-    print("\n" + "=" * 120)
+    print("\n" + "=" * 160)
     print("SUMMARY TABLE")
-    print("=" * 120)
+    print("=" * 160)
 
     # Header
     print(
-        f"{'File':<40} {'Composite':>9} {'Modal':>7} {'Vocab':>7} {'Stasis':>7} "
-        f"{'Conson':>7} {'Sparse':>7} {'Cadence':>7} {'Scale':<15}"
+        f"{'File':<35} {'Composite':>9} {'Modal':>7} {'MeloSm':>7} {'HarmRh':>7} "
+        f"{'NoteDur':>7} {'Stasis':>7} {'Conson':>7} {'Indep':>7} {'Cadence':>7} {'Scale':<15}"
     )
-    print("-" * 120)
+    print("-" * 160)
 
     # Rows
     for filepath, metrics in results:
         filename = os.path.basename(filepath)
-        if len(filename) > 37:
-            filename = filename[:34] + "..."
+        if len(filename) > 32:
+            filename = filename[:29] + "..."
 
         scale_str = f"{root_names[metrics.best_root]} {metrics.best_scale}"
         if len(scale_str) > 15:
             scale_str = scale_str[:12] + "..."
 
         print(
-            f"{filename:<40} {metrics.composite_score:>9.3f} {metrics.modal_consistency:>7.3f} "
-            f"{metrics.pitch_vocabulary_score:>7.3f} {metrics.voice_stasis:>7.3f} "
-            f"{metrics.consonance:>7.3f} {metrics.sparsity:>7.3f} "
+            f"{filename:<35} {metrics.composite_score:>9.3f} {metrics.modal_consistency:>7.3f} "
+            f"{metrics.melodic_smoothness:>7.3f} {metrics.harmonic_rhythm:>7.3f} "
+            f"{metrics.note_duration:>7.3f} {metrics.voice_stasis:>7.3f} "
+            f"{metrics.consonance:>7.3f} {metrics.voice_independence:>7.3f} "
             f"{metrics.cadence_penalty:>7.3f} {scale_str:<15}"
         )
 
-    print("=" * 120)
+    print("=" * 160)
 
     # Statistics
     if len(results) > 1:
