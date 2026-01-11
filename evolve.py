@@ -6,6 +6,7 @@ Evolves network genotypes to maximize ambient music fitness score.
 
 import os
 import sys
+import hashlib
 import numpy as np
 import matplotlib.pyplot as plt
 from contextlib import contextmanager
@@ -17,6 +18,47 @@ from tqdm import tqdm
 from network import NeuralNetwork, NetworkGenotype
 from utils_sonic import save_readout_outputs_as_midi
 from eval_ambient import evaluate_ambient
+
+
+# =============================================================================
+# Lineage Tracking
+# =============================================================================
+
+
+def compute_genotype_hash(genotype: NetworkGenotype) -> str:
+    """Compute a short hash from genotype weights for identification."""
+    # Combine key arrays into bytes
+    data = (
+        genotype.network_weights.tobytes()
+        + genotype.output_weights.tobytes()
+        + genotype.thresholds.tobytes()
+    )
+    return hashlib.md5(data).hexdigest()[:6]
+
+
+@dataclass
+class Individual:
+    """Wrapper for genotype with lineage tracking."""
+
+    genotype: NetworkGenotype
+    id: str = field(default_factory=lambda: "")
+    parent_id: Optional[str] = None
+    generation_born: int = 0
+
+    def __post_init__(self):
+        if not self.id:
+            self.id = compute_genotype_hash(self.genotype)
+
+    def mutate_to_child(
+        self, current_generation: int, **mutation_kwargs
+    ) -> "Individual":
+        """Create a mutated child with lineage tracking."""
+        child_genotype = self.genotype.mutate(**mutation_kwargs)
+        return Individual(
+            genotype=child_genotype,
+            parent_id=self.id,
+            generation_born=current_generation,
+        )
 
 
 @contextmanager
@@ -77,6 +119,7 @@ class EvalResult:
     spectral_radius: float
     total_firing_events: int
     mean_activation: float
+    activity_trend: float  # ratio of 2nd/1st half firing (used for culling)
     midi_path: Optional[str] = None
 
 
@@ -116,13 +159,28 @@ def evaluate_genotype(
     total_firing_events = int(np.sum(firing_history))
     mean_activation = float(np.mean(output_history))
 
-    # Check for degenerate cases (no activity)
-    if total_firing_events == 0 or mean_activation < 1e-6:
+    # Compute activity trend: ratio of 2nd half to 1st half firing
+    midpoint = config.sim_steps // 2
+    first_half_firing = np.sum(firing_history[:midpoint])
+    second_half_firing = np.sum(firing_history[midpoint:])
+    # Avoid division by zero; if first half is 0, use a small number
+    activity_trend = second_half_firing / max(first_half_firing, 1)
+
+    # Check for degenerate cases: no activity, fizzling, or exploding
+    # These get fitness=0 and skip expensive MIDI evaluation
+    is_degenerate = (
+        total_firing_events == 0
+        or mean_activation < 1e-6
+        or activity_trend < 0.5  # Fizzling: activity drops to less than half
+        or activity_trend > 2.0  # Exploding: activity more than doubles
+    )
+    if is_degenerate:
         return EvalResult(
             fitness=0.0,
             spectral_radius=spectral_radius,
             total_firing_events=total_firing_events,
             mean_activation=mean_activation,
+            activity_trend=activity_trend,
             midi_path=None,
         )
 
@@ -173,6 +231,7 @@ def evaluate_genotype(
         spectral_radius=spectral_radius,
         total_firing_events=total_firing_events,
         mean_activation=mean_activation,
+        activity_trend=activity_trend,
         midi_path=midi_filename if save_midi else None,
     )
 
@@ -195,6 +254,14 @@ class GenerationStats:
     best_firing_events: int
     mean_firing_events: float
     num_degenerate: int  # Networks with no activity
+    # Lineage tracking
+    best_id: str = ""
+    best_parent_id: Optional[str] = None
+    best_age: int = 0  # generations since birth
+    # Culling stats (degenerate networks removed from pool)
+    num_culled: int = 0  # networks with fitness=0 (fizzled, exploded, or dead)
+    # Population diversity
+    unique_lineages: int = 0  # unique parent IDs among surviving parents
 
 
 def run_evolution(
@@ -213,15 +280,18 @@ def run_evolution(
     # Create output directory
     os.makedirs(config.output_dir, exist_ok=True)
 
-    # Initialize population
+    # Initialize population with lineage tracking
     print(f"Initializing population with {config.mu} individuals...")
-    population = [NetworkGenotype.random() for _ in range(config.mu)]
+    population = [
+        Individual(genotype=NetworkGenotype.random(), generation_born=0)
+        for _ in range(config.mu)
+    ]
 
     # Evaluate initial population
     print("Evaluating initial population...")
     results = []
-    for geno in tqdm(population, desc="Initial eval", unit="ind"):
-        results.append(evaluate_genotype(geno, config))
+    for ind in tqdm(population, desc="Initial eval", unit="ind"):
+        results.append(evaluate_genotype(ind.genotype, config))
 
     fitnesses = [r.fitness for r in results]
 
@@ -229,29 +299,32 @@ def run_evolution(
     sorted_pairs = sorted(
         zip(population, results), key=lambda x: x[1].fitness, reverse=True
     )
-    population = [g for g, r in sorted_pairs]
-    results = [r for g, r in sorted_pairs]
+    population = [ind for ind, r in sorted_pairs]
+    results = [r for ind, r in sorted_pairs]
     fitnesses = [r.fitness for r in results]
 
     # Track history
     history: list[GenerationStats] = []
     best_ever_fitness = max(fitnesses)
-    best_ever_genotype = population[0]
+    best_ever_individual = population[0]
 
     # Main evolution loop
     print(f"\nStarting evolution: {config.generations} generations")
     print(f"  μ = {config.mu} parents, λ = {config.lambda_} offspring")
     print(f"  Output directory: {config.output_dir}")
-    print("-" * 70)
+    print("-" * 100)
 
     for gen in range(config.generations):
+        current_gen = gen + 1
+
         # Generate offspring via mutation
         offspring = []
         offspring_per_parent = config.lambda_ // config.mu
 
         for parent in population:
             for _ in range(offspring_per_parent):
-                child = parent.mutate(
+                child = parent.mutate_to_child(
+                    current_generation=current_gen,
                     weight_mutation_rate=config.weight_mutation_rate,
                     weight_mutation_scale=config.weight_mutation_scale,
                     threshold_mutation_rate=config.threshold_mutation_rate,
@@ -262,8 +335,10 @@ def run_evolution(
 
         # Evaluate offspring
         offspring_results = []
-        for geno in tqdm(offspring, desc=f"Gen {gen+1:3d}", unit="ind", leave=False):
-            offspring_results.append(evaluate_genotype(geno, config))
+        for ind in tqdm(
+            offspring, desc=f"Gen {current_gen:3d}", unit="ind", leave=False
+        ):
+            offspring_results.append(evaluate_genotype(ind.genotype, config))
 
         # Combine parents + offspring
         combined_pop = population + offspring
@@ -275,69 +350,92 @@ def run_evolution(
             key=lambda x: x[1].fitness,
             reverse=True,
         )
-        population = [g for g, r in sorted_pairs[: config.mu]]
-        results = [r for g, r in sorted_pairs[: config.mu]]
+        population = [ind for ind, r in sorted_pairs[: config.mu]]
+        results = [r for ind, r in sorted_pairs[: config.mu]]
         fitnesses = [r.fitness for r in results]
 
         # Compute statistics
-        all_fitnesses = [r.fitness for r in combined_results]
         all_spectral = [r.spectral_radius for r in combined_results]
         all_firing = [r.total_firing_events for r in combined_results]
         num_degenerate = sum(1 for r in combined_results if r.total_firing_events == 0)
+        # Culled = degenerate networks (fitness=0 due to dead, fizzling, or exploding)
+        num_culled = sum(1 for r in combined_results if r.fitness == 0.0)
+
+        best_ind = population[0]
+        best_result = results[0]
+
+        # Count unique lineages in surviving population (by parent_id, or own id if root)
+        lineage_ids = set()
+        for ind in population:
+            lineage_ids.add(ind.parent_id if ind.parent_id else ind.id)
+        unique_lineages = len(lineage_ids)
 
         stats = GenerationStats(
-            generation=gen + 1,
+            generation=current_gen,
             best_fitness=fitnesses[0],
             mean_fitness=np.mean(fitnesses),
             std_fitness=np.std(fitnesses),
-            best_spectral_radius=results[0].spectral_radius,
+            best_spectral_radius=best_result.spectral_radius,
             mean_spectral_radius=np.mean(all_spectral),
-            best_firing_events=results[0].total_firing_events,
+            best_firing_events=best_result.total_firing_events,
             mean_firing_events=np.mean(all_firing),
             num_degenerate=num_degenerate,
+            best_id=best_ind.id,
+            best_parent_id=best_ind.parent_id,
+            best_age=current_gen - best_ind.generation_born,
+            num_culled=num_culled,
+            unique_lineages=unique_lineages,
         )
         history.append(stats)
 
         # Update best ever
         if fitnesses[0] > best_ever_fitness:
             best_ever_fitness = fitnesses[0]
-            best_ever_genotype = population[0]
+            best_ever_individual = population[0]
 
-        # Progress output
+        # Progress output with lineage info
+        parent_info = f"←{best_ind.parent_id}" if best_ind.parent_id else "(root)"
         tqdm.write(
-            f"Gen {gen+1:3d} | "
+            f"Gen {current_gen:3d} | "
             f"Best: {stats.best_fitness:.4f} | "
-            f"Mean: {stats.mean_fitness:.4f} ± {stats.std_fitness:.4f} | "
-            f"ρ: {stats.best_spectral_radius:.2f} | "
-            f"Fire: {stats.best_firing_events:4d} | "
-            f"Dead: {stats.num_degenerate:3d}"
+            f"Mean: {stats.mean_fitness:.4f}±{stats.std_fitness:.4f} | "
+            f"ρ:{stats.best_spectral_radius:.2f} | "
+            f"{best_ind.id}{parent_info} age:{stats.best_age} | "
+            f"div:{unique_lineages:2d} | "
+            f"culled:{num_culled:3d}"
         )
 
         # Save best MIDI periodically
         if (
-            gen + 1
+            current_gen
         ) % config.save_every_n_generations == 0 or gen == config.generations - 1:
             midi_path = os.path.join(
-                config.output_dir, f"gen{gen+1:03d}_best_{stats.best_fitness:.4f}.mid"
+                config.output_dir,
+                f"gen{current_gen:03d}_best_{stats.best_fitness:.4f}.mid",
             )
             evaluate_genotype(
-                population[0], config, save_midi=True, midi_filename=midi_path
+                best_ind.genotype, config, save_midi=True, midi_filename=midi_path
             )
             tqdm.write(f"  → Saved: {midi_path}")
 
-    print("-" * 70)
-    print(f"Evolution complete! Best fitness: {best_ever_fitness:.4f}")
+    print("-" * 100)
+    print(
+        f"Evolution complete! Best fitness: {best_ever_fitness:.4f} (ID: {best_ever_individual.id})"
+    )
 
     # Save final best
     final_midi_path = os.path.join(
         config.output_dir, f"final_best_{best_ever_fitness:.4f}.mid"
     )
     evaluate_genotype(
-        best_ever_genotype, config, save_midi=True, midi_filename=final_midi_path
+        best_ever_individual.genotype,
+        config,
+        save_midi=True,
+        midi_filename=final_midi_path,
     )
     print(f"Final best saved to: {final_midi_path}")
 
-    return best_ever_genotype, history
+    return best_ever_individual.genotype, history
 
 
 # =============================================================================
@@ -401,20 +499,26 @@ def plot_evolution_history(
         bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
     )
 
-    # Bottom left: Firing events over generations
+    # Bottom left: Diversity and culling over generations
     ax = axes[1, 0]
-    ax.plot(generations, firing_events, "g-", linewidth=2, label="Best individual")
+    unique_lineages = [s.unique_lineages for s in history]
+    num_culled = [s.num_culled for s in history]
+
+    ax.plot(generations, unique_lineages, "g-", linewidth=2, label="Unique lineages")
     ax.set_xlabel("Generation")
-    ax.set_ylabel("Total Firing Events")
-    ax.set_title("Network Activity Over Generations")
-    ax.legend()
+    ax.set_ylabel("Diversity (unique parent lineages)")
+    ax.set_title("Population Diversity & Culling")
+    ax.legend(loc="upper left")
     ax.grid(True, alpha=0.3)
 
-    # Add degenerate count on secondary axis
+    # Add culled count on secondary axis
     ax2 = ax.twinx()
-    ax2.plot(generations, num_degenerate, "r-", alpha=0.5, label="Degenerate")
-    ax2.set_ylabel("Degenerate Networks", color="red")
+    ax2.fill_between(
+        generations, 0, num_culled, alpha=0.3, color="red", label="Culled (degenerate)"
+    )
+    ax2.set_ylabel("Culled networks", color="red")
     ax2.tick_params(axis="y", labelcolor="red")
+    ax2.legend(loc="upper right")
 
     # Bottom right: Network properties correlation heatmap
     ax = axes[1, 1]
