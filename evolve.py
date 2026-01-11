@@ -127,10 +127,11 @@ def evaluate_genotype(
         )
 
     # Compute voice thresholds (same as exp_outputs.py)
+    # Cap at 0.99 to handle saturated outputs (values clip at 1.0, so 95th percentile can be 1.0)
     voice_thresholds = np.zeros(num_readouts)
     for r in range(num_readouts):
         voice_data = output_history[:, r, :]
-        voice_thresholds[r] = np.percentile(voice_data, config.percentile)
+        voice_thresholds[r] = min(np.percentile(voice_data, config.percentile), 0.99)
 
     # Save MIDI (suppress verbose output)
     if save_midi and midi_filename:
