@@ -52,6 +52,199 @@ class NeuralNetworkState:
         return self.outputs.reshape(self.num_readouts, self.n_outputs_per_readout)
 
 
+@dataclass
+class NetworkGenotype:
+    """Simple direct encoding genotype for the spiking neural network.
+
+    Contains only the evolvable parameters:
+    - network_weights: neuron-to-neuron connection weights
+    - output_weights: neuron-to-output connection weights
+    - thresholds: firing threshold per neuron
+    - refraction_period: refractory period per neuron
+
+    Hyperparameters like activation_leak, refraction_leak are NOT part of the
+    genotype - they define the simulation physics, not the individual.
+    """
+
+    num_neurons: int
+    num_readouts: int
+    n_outputs_per_readout: int
+    network_weights: np.ndarray  # (num_neurons, num_neurons)
+    output_weights: np.ndarray  # (num_neurons, num_outputs)
+    thresholds: np.ndarray  # (num_neurons,)
+    refraction_period: np.ndarray  # (num_neurons,) integers
+
+    @property
+    def num_outputs(self) -> int:
+        return self.num_readouts * self.n_outputs_per_readout
+
+    @classmethod
+    def random(
+        cls,
+        num_neurons: int = 256,
+        num_readouts: int = 4,
+        n_outputs_per_readout: int = 12,
+    ) -> "NetworkGenotype":
+        """Create a random genotype using the same setup as exp_outputs.py."""
+        # Create network and use existing methods (same as exp_outputs.py)
+        net = NeuralNetwork(
+            num_neurons=num_neurons,
+            num_readouts=num_readouts,
+            n_outputs_per_readout=n_outputs_per_readout,
+        )
+        net.randomize_weights(sparsity=0.1, scale=0.4)
+        net.randomize_output_weights(sparsity=0.1, scale=0.2)
+        net.randomize_thresholds()
+        net.set_diagonal_weights(0)
+        net.enable_refraction_decay(2, 0.75, 32)
+
+        # Extract genotype from the configured network
+        return cls.from_network(net)
+
+    @classmethod
+    def from_network(cls, net: "NeuralNetwork") -> "NetworkGenotype":
+        """Extract genotype from an existing network."""
+        return cls(
+            num_neurons=net.state.num_neurons,
+            num_readouts=net.state.num_readouts,
+            n_outputs_per_readout=net.state.n_outputs_per_readout,
+            network_weights=net.state.network_weights.copy(),
+            output_weights=net.state.output_weights.copy(),
+            thresholds=net.state.thresholds.copy(),
+            refraction_period=net.state.refraction_period.copy(),
+        )
+
+    def to_network(
+        self,
+        activation_leak: float = 0.9,
+        refraction_leak: float = 0.75,
+    ) -> "NeuralNetwork":
+        """Create a NeuralNetwork from this genotype.
+
+        Args:
+            activation_leak: Leak factor for activations (0-1). Default from exp_outputs.py.
+            refraction_leak: Leak factor during refractory period (0-1). Default from exp_outputs.py.
+        """
+        net = NeuralNetwork(
+            num_neurons=self.num_neurons,
+            num_readouts=self.num_readouts,
+            n_outputs_per_readout=self.n_outputs_per_readout,
+        )
+        # Set genotype parameters
+        net.state.network_weights = self.network_weights.copy()
+        net.state.output_weights = self.output_weights.copy()
+        net.state.thresholds = self.thresholds.copy()
+        net.state.thresholds_current = self.thresholds.copy()
+        net.state.refraction_period = self.refraction_period.copy()
+
+        # Configure hyperparameters (don't overwrite refraction_period from genotype)
+        net.state.use_activation_leak = True
+        net.state.activation_leak = activation_leak
+        net.state.use_refraction_decay = True
+        net.state.refraction_leak = refraction_leak
+
+        return net
+
+    def mutate(
+        self,
+        weight_mutation_rate: float = 0.1,
+        weight_mutation_scale: float = 0.1,
+        threshold_mutation_rate: float = 0.1,
+        threshold_mutation_scale: float = 0.1,
+        refraction_mutation_rate: float = 0.05,
+    ) -> "NetworkGenotype":
+        """Return a mutated copy of this genotype.
+
+        Args:
+            weight_mutation_rate: Probability of mutating each weight
+            weight_mutation_scale: Std dev of gaussian noise added to weights
+            threshold_mutation_rate: Probability of mutating each threshold
+            threshold_mutation_scale: Std dev of gaussian noise added to thresholds
+            refraction_mutation_rate: Probability of mutating each refraction period
+        """
+        # Copy arrays
+        new_network_weights = self.network_weights.copy()
+        new_output_weights = self.output_weights.copy()
+        new_thresholds = self.thresholds.copy()
+        new_refraction = self.refraction_period.copy()
+
+        # Mutate network weights
+        mask = np.random.random(new_network_weights.shape) < weight_mutation_rate
+        new_network_weights += (
+            mask * np.random.randn(*new_network_weights.shape) * weight_mutation_scale
+        )
+        new_network_weights = np.clip(new_network_weights, -1, 1)
+        np.fill_diagonal(new_network_weights, 0)  # Preserve no self-connections
+
+        # Mutate output weights
+        mask = np.random.random(new_output_weights.shape) < weight_mutation_rate
+        new_output_weights += (
+            mask * np.random.randn(*new_output_weights.shape) * weight_mutation_scale
+        )
+        new_output_weights = np.clip(new_output_weights, -1, 1)
+
+        # Mutate thresholds
+        mask = np.random.random(new_thresholds.shape) < threshold_mutation_rate
+        new_thresholds += (
+            mask * np.random.randn(*new_thresholds.shape) * threshold_mutation_scale
+        )
+        new_thresholds = np.clip(new_thresholds, 0, 1)
+
+        # Mutate refraction periods (add/subtract 1)
+        mask = np.random.random(new_refraction.shape) < refraction_mutation_rate
+        new_refraction = new_refraction + mask * np.random.choice(
+            [-1, 1], size=new_refraction.shape
+        )
+        new_refraction = np.clip(new_refraction, 2, 33).astype(
+            int
+        )  # Match random() range
+
+        return NetworkGenotype(
+            num_neurons=self.num_neurons,
+            num_readouts=self.num_readouts,
+            n_outputs_per_readout=self.n_outputs_per_readout,
+            network_weights=new_network_weights,
+            output_weights=new_output_weights,
+            thresholds=new_thresholds,
+            refraction_period=new_refraction,
+        )
+
+    def crossover(self, other: "NetworkGenotype") -> "NetworkGenotype":
+        """Uniform crossover: randomly pick each gene from either parent."""
+        assert self.num_neurons == other.num_neurons
+        assert self.num_outputs == other.num_outputs
+
+        # For weights: element-wise random choice
+        mask_net = np.random.random(self.network_weights.shape) < 0.5
+        new_network_weights = np.where(
+            mask_net, self.network_weights, other.network_weights
+        )
+
+        mask_out = np.random.random(self.output_weights.shape) < 0.5
+        new_output_weights = np.where(
+            mask_out, self.output_weights, other.output_weights
+        )
+
+        # For per-neuron params: element-wise random choice
+        mask_thresh = np.random.random(self.thresholds.shape) < 0.5
+        new_thresholds = np.where(mask_thresh, self.thresholds, other.thresholds)
+
+        mask_refrac = np.random.random(self.refraction_period.shape) < 0.5
+        new_refraction = np.where(
+            mask_refrac, self.refraction_period, other.refraction_period
+        )
+
+        return NetworkGenotype(
+            num_neurons=self.num_neurons,
+            num_readouts=self.num_readouts,
+            n_outputs_per_readout=self.n_outputs_per_readout,
+            network_weights=new_network_weights,
+            output_weights=new_output_weights,
+            thresholds=new_thresholds,
+            refraction_period=new_refraction,
+        )
+
+
 class NeuralNetwork:
     def __init__(
         self,
