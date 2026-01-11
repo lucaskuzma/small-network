@@ -5,8 +5,10 @@ Evolves network genotypes to maximize ambient music fitness score.
 """
 
 import os
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -15,6 +17,18 @@ from tqdm import tqdm
 from network import NeuralNetwork, NetworkGenotype
 from utils_sonic import save_readout_outputs_as_midi
 from eval_ambient import evaluate_ambient
+
+
+@contextmanager
+def suppress_stdout():
+    """Context manager to suppress stdout (for noisy function calls)."""
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        sys.stdout = devnull
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout
 
 
 # =============================================================================
@@ -89,8 +103,9 @@ def evaluate_genotype(
     output_history = np.zeros((config.sim_steps, num_readouts, n_outputs_per_readout))
     firing_history = np.zeros((config.sim_steps, genotype.num_neurons), dtype=bool)
 
-    # Initial activation - activate the most connected neuron
-    net.manual_activate_most_weighted(1.0)
+    # Initial activation - activate the most connected neuron (suppress print)
+    with suppress_stdout():
+        net.manual_activate_most_weighted(1.0)
 
     # Run simulation
     for step in range(config.sim_steps):
@@ -117,26 +132,28 @@ def evaluate_genotype(
         voice_data = output_history[:, r, :]
         voice_thresholds[r] = np.percentile(voice_data, config.percentile)
 
-    # Save MIDI
+    # Save MIDI (suppress verbose output)
     if save_midi and midi_filename:
         os.makedirs(os.path.dirname(midi_filename), exist_ok=True)
+        with suppress_stdout():
+            save_readout_outputs_as_midi(
+                output_history,
+                filename=midi_filename,
+                tempo=config.tempo,
+                threshold=voice_thresholds,
+                base_notes=config.base_notes,
+            )
+
+    # Create temporary MIDI for evaluation (suppress verbose output)
+    temp_midi = f"/tmp/evolve_eval_{os.getpid()}_{id(genotype)}.mid"
+    with suppress_stdout():
         save_readout_outputs_as_midi(
             output_history,
-            filename=midi_filename,
+            filename=temp_midi,
             tempo=config.tempo,
             threshold=voice_thresholds,
             base_notes=config.base_notes,
         )
-
-    # Create temporary MIDI for evaluation
-    temp_midi = f"/tmp/evolve_eval_{os.getpid()}_{id(genotype)}.mid"
-    save_readout_outputs_as_midi(
-        output_history,
-        filename=temp_midi,
-        tempo=config.tempo,
-        threshold=voice_thresholds,
-        base_notes=config.base_notes,
-    )
 
     # Evaluate fitness
     try:
