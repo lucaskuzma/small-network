@@ -168,16 +168,22 @@ class NetworkGenotype:
         new_thresholds = self.thresholds.copy()
         new_refraction = self.refraction_period.copy()
 
-        # Mutate network weights
-        mask = np.random.random(new_network_weights.shape) < weight_mutation_rate
+        # Mutate network weights (only existing connections)
+        existing = new_network_weights != 0
+        mask = (
+            np.random.random(new_network_weights.shape) < weight_mutation_rate
+        ) & existing
         new_network_weights += (
             mask * np.random.randn(*new_network_weights.shape) * weight_mutation_scale
         )
         new_network_weights = np.clip(new_network_weights, -1, 1)
         np.fill_diagonal(new_network_weights, 0)  # Preserve no self-connections
 
-        # Mutate output weights
-        mask = np.random.random(new_output_weights.shape) < weight_mutation_rate
+        # Mutate output weights (only existing connections)
+        existing = new_output_weights != 0
+        mask = (
+            np.random.random(new_output_weights.shape) < weight_mutation_rate
+        ) & existing
         new_output_weights += (
             mask * np.random.randn(*new_output_weights.shape) * weight_mutation_scale
         )
