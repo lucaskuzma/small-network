@@ -7,12 +7,13 @@ Evolves network genotypes to maximize ambient music fitness score.
 import os
 import sys
 import hashlib
+import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 from tqdm import tqdm
 
 from network import NeuralNetwork, NetworkGenotype
@@ -59,6 +60,34 @@ class Individual:
             parent_id=self.id,
             generation_born=current_generation,
         )
+
+
+@dataclass
+class Checkpoint:
+    """Checkpoint for resuming evolution."""
+
+    generation: int
+    population: list[Individual]
+    results: list["EvalResult"]
+    history: list["GenerationStats"]
+    best_ever_fitness: float
+    best_ever_individual: Individual
+    config: "EvolutionConfig"
+
+    def save(self, path: str, quiet: bool = True):
+        """Save checkpoint to file."""
+        with open(path, "wb") as f:
+            pickle.dump(self, f)
+        if not quiet:
+            print(f"Checkpoint saved: {path}")
+
+    @classmethod
+    def load(cls, path: str) -> "Checkpoint":
+        """Load checkpoint from file."""
+        with open(path, "rb") as f:
+            checkpoint = pickle.load(f)
+        print(f"Checkpoint loaded: {path} (generation {checkpoint.generation})")
+        return checkpoint
 
 
 @contextmanager
@@ -266,57 +295,86 @@ class GenerationStats:
 
 def run_evolution(
     config: EvolutionConfig,
+    resume_from: Optional[Union[str, Checkpoint]] = None,
+    additional_generations: Optional[int] = None,
 ) -> tuple[NetworkGenotype, list[GenerationStats]]:
     """
     Run (μ + λ) evolution strategy.
+
+    Args:
+        config: Evolution configuration
+        resume_from: Path to checkpoint file or Checkpoint object to resume from
+        additional_generations: If resuming, run this many more generations
+                               (overrides config.generations)
 
     Returns:
         best_genotype: The best genotype found
         history: List of GenerationStats for each generation
     """
-    if config.random_seed is not None:
-        np.random.seed(config.random_seed)
-
     # Create output directory
     os.makedirs(config.output_dir, exist_ok=True)
 
-    # Initialize population with lineage tracking
-    print(f"Initializing population with {config.mu} individuals...")
-    population = [
-        Individual(genotype=NetworkGenotype.random(), generation_born=0)
-        for _ in range(config.mu)
-    ]
+    # Resume from checkpoint or start fresh
+    if resume_from:
+        if isinstance(resume_from, str):
+            checkpoint = Checkpoint.load(resume_from)
+        else:
+            checkpoint = resume_from
+        population = checkpoint.population
+        results = checkpoint.results
+        history = checkpoint.history
+        best_ever_fitness = checkpoint.best_ever_fitness
+        best_ever_individual = checkpoint.best_ever_individual
+        start_gen = checkpoint.generation
 
-    # Evaluate initial population
-    print("Evaluating initial population...")
-    results = []
-    for ind in tqdm(population, desc="Initial eval", unit="ind"):
-        results.append(evaluate_genotype(ind.genotype, config))
+        # Determine total generations
+        if additional_generations:
+            total_generations = start_gen + additional_generations
+        else:
+            total_generations = max(config.generations, start_gen + 10)
 
-    fitnesses = [r.fitness for r in results]
+        print(f"Resuming from generation {start_gen}")
+        print(f"  Will run until generation {total_generations}")
+    else:
+        if config.random_seed is not None:
+            np.random.seed(config.random_seed)
 
-    # Sort by fitness (descending)
-    sorted_pairs = sorted(
-        zip(population, results), key=lambda x: x[1].fitness, reverse=True
-    )
-    population = [ind for ind, r in sorted_pairs]
-    results = [r for ind, r in sorted_pairs]
-    fitnesses = [r.fitness for r in results]
+        # Initialize population with lineage tracking
+        print(f"Initializing population with {config.mu} individuals...")
+        population = [
+            Individual(genotype=NetworkGenotype.random(), generation_born=0)
+            for _ in range(config.mu)
+        ]
 
-    # Track history
-    history: list[GenerationStats] = []
-    best_ever_fitness = max(fitnesses)
-    best_ever_individual = population[0]
+        # Evaluate initial population
+        print("Evaluating initial population...")
+        results = []
+        for ind in tqdm(population, desc="Initial eval", unit="ind"):
+            results.append(evaluate_genotype(ind.genotype, config))
+
+        fitnesses = [r.fitness for r in results]
+
+        # Sort by fitness (descending)
+        sorted_pairs = sorted(
+            zip(population, results), key=lambda x: x[1].fitness, reverse=True
+        )
+        population = [ind for ind, r in sorted_pairs]
+        results = [r for ind, r in sorted_pairs]
+
+        # Track history
+        history = []
+        best_ever_fitness = max(r.fitness for r in results)
+        best_ever_individual = population[0]
+        start_gen = 0
+        total_generations = config.generations
 
     # Main evolution loop
-    print(f"\nStarting evolution: {config.generations} generations")
+    print(f"\nRunning evolution: generations {start_gen + 1} to {total_generations}")
     print(f"  μ = {config.mu} parents, λ = {config.lambda_} offspring")
     print(f"  Output directory: {config.output_dir}")
     print("-" * 100)
 
-    for gen in range(config.generations):
-        current_gen = gen + 1
-
+    for current_gen in range(start_gen + 1, total_generations + 1):
         # Generate offspring via mutation
         offspring = []
         offspring_per_parent = config.lambda_ // config.mu
@@ -405,10 +463,9 @@ def run_evolution(
             f"culled:{num_culled:3d}"
         )
 
-        # Save best MIDI periodically
-        if (
-            current_gen
-        ) % config.save_every_n_generations == 0 or gen == config.generations - 1:
+        # Save best MIDI and checkpoint periodically
+        is_last_gen = current_gen == total_generations
+        if current_gen % config.save_every_n_generations == 0 or is_last_gen:
             midi_path = os.path.join(
                 config.output_dir,
                 f"gen{current_gen:03d}_best_{stats.best_fitness:.4f}.mid",
@@ -417,6 +474,19 @@ def run_evolution(
                 best_ind.genotype, config, save_midi=True, midi_filename=midi_path
             )
             tqdm.write(f"  → Saved: {midi_path}")
+
+            # Save checkpoint
+            checkpoint = Checkpoint(
+                generation=current_gen,
+                population=population,
+                results=results,
+                history=history,
+                best_ever_fitness=best_ever_fitness,
+                best_ever_individual=best_ever_individual,
+                config=config,
+            )
+            checkpoint_path = os.path.join(config.output_dir, "checkpoint.pkl")
+            checkpoint.save(checkpoint_path)
 
     print("-" * 100)
     print(
@@ -561,29 +631,80 @@ def plot_evolution_history(
 # Main
 # =============================================================================
 
-if __name__ == "__main__":
-    # Configuration
-    config = EvolutionConfig(
-        mu=20,
-        lambda_=100,
-        generations=50,
-        random_seed=42,
-        save_every_n_generations=5,
+
+def resume_evolution(
+    checkpoint_path: str,
+    additional_generations: int = 10,
+) -> tuple[NetworkGenotype, list[GenerationStats]]:
+    """
+    Resume evolution from a checkpoint.
+
+    Args:
+        checkpoint_path: Path to checkpoint.pkl file
+        additional_generations: How many more generations to run
+
+    Returns:
+        best_genotype: The best genotype found
+        history: Full history including resumed generations
+    """
+    checkpoint = Checkpoint.load(checkpoint_path)
+
+    return run_evolution(
+        checkpoint.config,
+        resume_from=checkpoint,
+        additional_generations=additional_generations,
     )
 
-    # Run evolution
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    config.output_dir = f"evolve_midi/{timestamp}"
 
-    best_genotype, history = run_evolution(config)
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Evolve neural networks for ambient music"
+    )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        help="Path to checkpoint.pkl to resume from",
+    )
+    parser.add_argument(
+        "--generations",
+        type=int,
+        default=50,
+        help="Number of generations (or additional generations if resuming)",
+    )
+    args = parser.parse_args()
+
+    if args.resume:
+        # Resume from checkpoint
+        checkpoint = Checkpoint.load(args.resume)
+        config = checkpoint.config
+
+        best_genotype, history = run_evolution(
+            config,
+            resume_from=checkpoint,
+            additional_generations=args.generations,
+        )
+    else:
+        # Fresh run
+        config = EvolutionConfig(
+            mu=20,
+            lambda_=100,
+            generations=args.generations,
+            random_seed=42,
+            save_every_n_generations=5,
+        )
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        config.output_dir = f"evolve_midi/{timestamp}"
+
+        best_genotype, history = run_evolution(config)
 
     # Plot results
     plot_path = os.path.join(config.output_dir, "evolution_history.png")
     plot_evolution_history(history, save_path=plot_path)
 
     # Save best genotype
-    import pickle
-
     genotype_path = os.path.join(config.output_dir, "best_genotype.pkl")
     with open(genotype_path, "wb") as f:
         pickle.dump(best_genotype, f)
