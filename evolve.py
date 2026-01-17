@@ -406,31 +406,22 @@ def run_evolution(
     print(f"  Output directory: {config.output_dir}")
     print("-" * 100)
 
-    # 1/5th rule for adaptive mutation
-    # σ multiplier: increase if >1/5 offspring beat parent, decrease if <1/5
-    sigma_factor = 1.0
-    sigma_adjust = 1.2  # Adjustment rate (classic is ~1.22)
-
     for current_gen in range(start_gen + 1, total_generations + 1):
-        # Generate offspring via mutation with current sigma_factor
+        # Generate offspring via mutation (constant rates)
         offspring = []
-        parent_fitness_map = {}  # Track each offspring's parent fitness
         offspring_per_parent = config.lambda_ // config.mu
 
-        for parent_idx, parent in enumerate(population):
-            parent_result = results[parent_idx]
+        for parent in population:
             for _ in range(offspring_per_parent):
                 child = parent.mutate_to_child(
                     current_generation=current_gen,
                     weight_mutation_rate=config.weight_mutation_rate,
-                    weight_mutation_scale=config.weight_mutation_scale * sigma_factor,
+                    weight_mutation_scale=config.weight_mutation_scale,
                     threshold_mutation_rate=config.threshold_mutation_rate,
-                    threshold_mutation_scale=config.threshold_mutation_scale
-                    * sigma_factor,
+                    threshold_mutation_scale=config.threshold_mutation_scale,
                     refraction_mutation_rate=config.refraction_mutation_rate,
                 )
                 offspring.append(child)
-                parent_fitness_map[child.id] = parent_result.fitness
 
         # Evaluate offspring
         offspring_results = []
@@ -438,22 +429,6 @@ def run_evolution(
             offspring, desc=f"Gen {current_gen:3d}", unit="ind", leave=False
         ):
             offspring_results.append(evaluate_genotype(ind.genotype, config))
-
-        # 1/5th rule: count how many offspring beat their parent
-        num_successful = sum(
-            1
-            for ind, result in zip(offspring, offspring_results)
-            if result.fitness > parent_fitness_map[ind.id]
-        )
-        success_rate = num_successful / len(offspring) if offspring else 0
-
-        # Adjust sigma: increase if >1/5 succeed (good gradient), decrease if <1/5 (overshooting)
-        if success_rate > 0.2:
-            sigma_factor *= sigma_adjust  # Increase step size
-        elif success_rate < 0.2:
-            sigma_factor /= sigma_adjust  # Decrease step size
-        # Clamp sigma_factor to reasonable bounds
-        sigma_factor = np.clip(sigma_factor, 0.1, 5.0)
 
         # Track previous generation's parent IDs for survival visualization
         prev_parent_ids = {ind.id for ind in population}
@@ -517,17 +492,36 @@ def run_evolution(
             best_ever_fitness = fitnesses[0]
             best_ever_individual = population[0]
 
-        # Progress output with survival visualization and 1/5th rule info
-        # ● = parent survived, ○ = replaced by offspring
-        # σ = sigma_factor, ✓ = success rate (fraction of offspring beating parent)
+        # Diversity injection: if population collapsed (almost all parents survived),
+        # replace worst 25% with fresh random individuals
+        num_inject = 0
+        if num_parents_survived >= config.mu - 2:  # Almost no turnover
+            num_inject = config.mu // 4  # Replace 25%
+            # Get network params from existing genotype
+            ref_geno = population[0].genotype
+            for i in range(num_inject):
+                fresh = Individual(
+                    genotype=NetworkGenotype.random(
+                        num_neurons=ref_geno.num_neurons,
+                        num_readouts=ref_geno.num_readouts,
+                        n_outputs_per_readout=ref_geno.n_outputs_per_readout,
+                    ),
+                    generation_born=current_gen,
+                )
+                population[-(i + 1)] = fresh
+                # Re-evaluate the fresh individual
+                results[-(i + 1)] = evaluate_genotype(fresh.genotype, config)
+
+        # Progress output with survival visualization
+        # ● = parent survived, ○ = replaced by offspring, + = injected fresh
+        inject_str = f" +{num_inject}" if num_inject > 0 else ""
         tqdm.write(
             f"Gen {current_gen:3d} | "
             f"Best: {stats.best_fitness:.4f} | "
             f"Mean: {stats.mean_fitness:.4f}±{stats.std_fitness:.4f} | "
             f"notes:{best_result.note_count:3d} | "
-            f"[{survival_str}] | "
-            f"age:{stats.best_age:2d} | "
-            f"σ:{sigma_factor:.2f} ✓:{success_rate:.0%}"
+            f"[{survival_str}]{inject_str} | "
+            f"div:{unique_lineages:2d}"
         )
 
         # Save best MIDI and checkpoint periodically
