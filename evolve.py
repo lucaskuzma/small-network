@@ -299,6 +299,7 @@ def run_evolution(
     config: EvolutionConfig,
     resume_from: Optional[Union[str, Checkpoint]] = None,
     additional_generations: Optional[int] = None,
+    initial_population: Optional[list[Individual]] = None,
 ) -> tuple[NetworkGenotype, list[GenerationStats]]:
     """
     Run (μ + λ) evolution strategy.
@@ -308,6 +309,7 @@ def run_evolution(
         resume_from: Path to checkpoint file or Checkpoint object to resume from
         additional_generations: If resuming, run this many more generations
                                (overrides config.generations)
+        initial_population: Optional pre-created population (for custom genotype configs)
 
     Returns:
         best_genotype: The best genotype found
@@ -341,12 +343,17 @@ def run_evolution(
         if config.random_seed is not None:
             np.random.seed(config.random_seed)
 
-        # Initialize population with lineage tracking
-        print(f"Initializing population with {config.mu} individuals...")
-        population = [
-            Individual(genotype=NetworkGenotype.random(), generation_born=0)
-            for _ in range(config.mu)
-        ]
+        # Use provided population or create default
+        if initial_population is not None:
+            population = initial_population
+            print(f"Using provided population with {len(population)} individuals")
+        else:
+            # Initialize population with lineage tracking (default: 12 outputs)
+            print(f"Initializing population with {config.mu} individuals...")
+            population = [
+                Individual(genotype=NetworkGenotype.random(), generation_born=0)
+                for _ in range(config.mu)
+            ]
 
         # Evaluate initial population
         print("Evaluating initial population...")
@@ -725,6 +732,21 @@ def resume_evolution(
     )
 
 
+def get_encoding_config(encoding: str) -> tuple[Callable, int]:
+    """
+    Get mapper and n_outputs_per_readout for encoding type.
+
+    Returns:
+        (midi_mapper, n_outputs_per_readout)
+    """
+    if encoding == "pitch":
+        return create_pitch_class_mapper(), 12
+    elif encoding == "motion":
+        return create_motion_mapper(), 8
+    else:
+        raise ValueError(f"Unknown encoding: {encoding}")
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -741,6 +763,13 @@ if __name__ == "__main__":
         type=int,
         default=50,
         help="Number of generations (or additional generations if resuming)",
+    )
+    parser.add_argument(
+        "--encoding",
+        type=str,
+        choices=["pitch", "motion"],
+        default="pitch",
+        help="Output encoding: 'pitch' (12 chromatic outputs) or 'motion' (8 motion outputs)",
     )
     args = parser.parse_args()
 
@@ -759,20 +788,37 @@ if __name__ == "__main__":
             additional_generations=args.generations,
         )
     else:
-        # Fresh run with pitch-class mapper (default behavior)
+        # Get encoding-specific config
+        midi_mapper, n_outputs = get_encoding_config(args.encoding)
+
+        # Fresh run
         config = EvolutionConfig(
             mu=20,
             lambda_=100,
             generations=args.generations,
             random_seed=42,
             save_every_n_generations=5,
-            midi_mapper=create_pitch_class_mapper(),
+            midi_mapper=midi_mapper,
         )
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        config.output_dir = f"evolve_midi/{timestamp}"
+        config.output_dir = f"evolve_midi/{timestamp}_{args.encoding}"
 
-        best_genotype, history = run_evolution(config)
+        # Create initial population with correct output size
+        print(f"Encoding: {args.encoding} ({n_outputs} outputs per voice)")
+        np.random.seed(config.random_seed)
+
+        initial_population = [
+            Individual(
+                genotype=NetworkGenotype.random(n_outputs_per_readout=n_outputs),
+                generation_born=0,
+            )
+            for _ in range(config.mu)
+        ]
+
+        best_genotype, history = run_evolution(
+            config, initial_population=initial_population
+        )
 
     # Plot results
     plot_path = os.path.join(config.output_dir, "evolution_history.png")
