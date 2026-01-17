@@ -145,9 +145,29 @@ class EvolutionConfig:
     save_every_n_generations: int = 5  # Save best MIDI every N generations
     random_seed: Optional[int] = None
 
-    # Output mapping (injected) - converts network outputs to MIDI
-    # If None, must be set before running evolution
-    midi_mapper: Optional[Callable[..., str]] = None
+    # Output encoding - determines how network outputs map to MIDI
+    # "pitch" = 12 chromatic outputs, "motion" = 8 motion outputs
+    encoding: str = "pitch"
+
+    # Transient (not pickled) - recreated from encoding on load
+    _midi_mapper: Optional[Callable[..., str]] = field(default=None, repr=False)
+
+    @property
+    def midi_mapper(self) -> Callable[..., str]:
+        """Get the MIDI mapper, creating it if needed."""
+        if self._midi_mapper is None:
+            self._midi_mapper = _create_mapper_for_encoding(self.encoding)
+        return self._midi_mapper
+
+    @midi_mapper.setter
+    def midi_mapper(self, value):
+        self._midi_mapper = value
+
+    def __getstate__(self):
+        """Exclude _midi_mapper from pickle (can't pickle closures)."""
+        state = self.__dict__.copy()
+        state["_midi_mapper"] = None
+        return state
 
 
 # =============================================================================
@@ -228,12 +248,7 @@ def evaluate_genotype(
             midi_path=None,
         )
 
-    # Convert outputs to MIDI using injected mapper
-    if config.midi_mapper is None:
-        raise ValueError(
-            "EvolutionConfig.midi_mapper must be set before running evolution"
-        )
-
+    # Convert outputs to MIDI using mapper (auto-created from config.encoding)
     # Save MIDI (suppress verbose output)
     if save_midi and midi_filename:
         os.makedirs(os.path.dirname(midi_filename), exist_ok=True)
@@ -641,6 +656,16 @@ def plot_evolution_history(
 # =============================================================================
 
 
+def _create_mapper_for_encoding(encoding: str) -> Callable[..., str]:
+    """Create the appropriate mapper for an encoding type."""
+    if encoding == "pitch":
+        return create_pitch_class_mapper()
+    elif encoding == "motion":
+        return create_motion_mapper()
+    else:
+        raise ValueError(f"Unknown encoding: {encoding}")
+
+
 def create_pitch_class_mapper(
     base_notes: list[int] = [48, 60, 72, 84],
     percentile: int = 95,
@@ -732,17 +757,12 @@ def resume_evolution(
     )
 
 
-def get_encoding_config(encoding: str) -> tuple[Callable, int]:
-    """
-    Get mapper and n_outputs_per_readout for encoding type.
-
-    Returns:
-        (midi_mapper, n_outputs_per_readout)
-    """
+def get_n_outputs_for_encoding(encoding: str) -> int:
+    """Get n_outputs_per_readout for encoding type."""
     if encoding == "pitch":
-        return create_pitch_class_mapper(), 12
+        return 12
     elif encoding == "motion":
-        return create_motion_mapper(), 8
+        return 8
     else:
         raise ValueError(f"Unknown encoding: {encoding}")
 
@@ -778,9 +798,9 @@ if __name__ == "__main__":
         checkpoint = Checkpoint.load(args.resume)
         config = checkpoint.config
 
-        # Ensure midi_mapper is set (checkpoints from old versions may not have it)
-        if config.midi_mapper is None:
-            config.midi_mapper = create_pitch_class_mapper()
+        # Handle old checkpoints without encoding field
+        if not hasattr(config, "encoding") or config.encoding is None:
+            config.encoding = "pitch"
 
         best_genotype, history = run_evolution(
             config,
@@ -788,8 +808,8 @@ if __name__ == "__main__":
             additional_generations=args.generations,
         )
     else:
-        # Get encoding-specific config
-        midi_mapper, n_outputs = get_encoding_config(args.encoding)
+        # Get outputs per voice for this encoding
+        n_outputs = get_n_outputs_for_encoding(args.encoding)
 
         # Fresh run
         config = EvolutionConfig(
@@ -798,7 +818,7 @@ if __name__ == "__main__":
             generations=args.generations,
             random_seed=42,
             save_every_n_generations=5,
-            midi_mapper=midi_mapper,
+            encoding=args.encoding,
         )
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
