@@ -406,35 +406,31 @@ def run_evolution(
     print(f"  Output directory: {config.output_dir}")
     print("-" * 100)
 
-    # Track stagnation for adaptive mutation
-    generations_without_improvement = 0
-    last_best_fitness = best_ever_fitness
+    # 1/5th rule for adaptive mutation
+    # σ multiplier: increase if >1/5 offspring beat parent, decrease if <1/5
+    sigma_factor = 1.0
+    sigma_adjust = 1.2  # Adjustment rate (classic is ~1.22)
 
     for current_gen in range(start_gen + 1, total_generations + 1):
-        # Adaptive mutation: boost rates when stuck
-        # After 5 gens without improvement, start increasing mutation
-        stagnation_boost = 1.0 + max(0, generations_without_improvement - 5) * 0.2
-        stagnation_boost = min(stagnation_boost, 3.0)  # Cap at 3x
-
-        # Generate offspring via mutation
+        # Generate offspring via mutation with current sigma_factor
         offspring = []
+        parent_fitness_map = {}  # Track each offspring's parent fitness
         offspring_per_parent = config.lambda_ // config.mu
 
         for parent in population:
+            parent_result = results[population.index(parent)]
             for _ in range(offspring_per_parent):
                 child = parent.mutate_to_child(
                     current_generation=current_gen,
-                    weight_mutation_rate=config.weight_mutation_rate * stagnation_boost,
-                    weight_mutation_scale=config.weight_mutation_scale
-                    * stagnation_boost,
-                    threshold_mutation_rate=config.threshold_mutation_rate
-                    * stagnation_boost,
+                    weight_mutation_rate=config.weight_mutation_rate,
+                    weight_mutation_scale=config.weight_mutation_scale * sigma_factor,
+                    threshold_mutation_rate=config.threshold_mutation_rate,
                     threshold_mutation_scale=config.threshold_mutation_scale
-                    * stagnation_boost,
-                    refraction_mutation_rate=config.refraction_mutation_rate
-                    * stagnation_boost,
+                    * sigma_factor,
+                    refraction_mutation_rate=config.refraction_mutation_rate,
                 )
                 offspring.append(child)
+                parent_fitness_map[child.id] = parent_result.fitness
 
         # Evaluate offspring
         offspring_results = []
@@ -442,6 +438,22 @@ def run_evolution(
             offspring, desc=f"Gen {current_gen:3d}", unit="ind", leave=False
         ):
             offspring_results.append(evaluate_genotype(ind.genotype, config))
+
+        # 1/5th rule: count how many offspring beat their parent
+        num_successful = sum(
+            1
+            for ind, result in zip(offspring, offspring_results)
+            if result.fitness > parent_fitness_map[ind.id]
+        )
+        success_rate = num_successful / len(offspring) if offspring else 0
+
+        # Adjust sigma: increase if >1/5 succeed (good gradient), decrease if <1/5 (overshooting)
+        if success_rate > 0.2:
+            sigma_factor *= sigma_adjust  # Increase step size
+        elif success_rate < 0.2:
+            sigma_factor /= sigma_adjust  # Decrease step size
+        # Clamp sigma_factor to reasonable bounds
+        sigma_factor = np.clip(sigma_factor, 0.1, 5.0)
 
         # Track previous generation's parent IDs for survival visualization
         prev_parent_ids = {ind.id for ind in population}
@@ -500,19 +512,14 @@ def run_evolution(
         )
         history.append(stats)
 
-        # Update best ever and stagnation tracking
+        # Update best ever
         if fitnesses[0] > best_ever_fitness:
             best_ever_fitness = fitnesses[0]
             best_ever_individual = population[0]
-            generations_without_improvement = 0
-        else:
-            generations_without_improvement += 1
 
-        # Progress output with survival visualization
+        # Progress output with survival visualization and 1/5th rule info
         # ● = parent survived, ○ = replaced by offspring
-        stag_indicator = (
-            f"stag:{generations_without_improvement}" if stagnation_boost > 1.0 else ""
-        )
+        # σ = sigma_factor, ✓ = success rate (fraction of offspring beating parent)
         tqdm.write(
             f"Gen {current_gen:3d} | "
             f"Best: {stats.best_fitness:.4f} | "
@@ -520,12 +527,7 @@ def run_evolution(
             f"notes:{best_result.note_count:3d} | "
             f"[{survival_str}] | "
             f"age:{stats.best_age:2d} | "
-            f"culled:{num_culled:3d}"
-            + (
-                f" | {stag_indicator} mut×{stagnation_boost:.1f}"
-                if stagnation_boost > 1.0
-                else ""
-            )
+            f"σ:{sigma_factor:.2f} ✓:{success_rate:.0%}"
         )
 
         # Save best MIDI and checkpoint periodically
