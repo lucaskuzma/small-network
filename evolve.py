@@ -731,18 +731,23 @@ def create_motion_mapper(
     from utils_sonic import save_motion_outputs_as_midi
 
     def mapper(output_history: np.ndarray, filename: str, tempo: int) -> str:
-        # Compute velocity values (v1 * v2) across all voices and timesteps
+        # Compute velocity values (v1 * v2) per voice
         # Outputs 6 and 7 are v1 and v2
-        vel_values = output_history[:, :, 6] * output_history[:, :, 7]
+        num_voices = output_history.shape[1]
 
-        # Compute adaptive threshold from percentile
-        velocity_threshold = min(np.percentile(vel_values, velocity_percentile), 0.99)
+        # Compute adaptive threshold PER VOICE (so quiet voices aren't drowned out)
+        velocity_thresholds = np.zeros(num_voices)
+        for v in range(num_voices):
+            vel_values = output_history[:, v, 6] * output_history[:, v, 7]
+            velocity_thresholds[v] = min(
+                np.percentile(vel_values, velocity_percentile), 0.99
+            )
 
         save_motion_outputs_as_midi(
             output_history,
             filename=filename,
             tempo=tempo,
-            velocity_threshold=velocity_threshold,
+            velocity_threshold=velocity_thresholds,  # now per-voice array
             start_pitches=start_pitches,
             velocity_range=velocity_range,
         )

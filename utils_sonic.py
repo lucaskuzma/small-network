@@ -455,6 +455,11 @@ def save_motion_outputs_as_midi(
     up_weights = np.array([1, 4, 7])
     down_weights = np.array([1, 3, 8])
 
+    # Convert velocity_threshold to per-voice array if scalar
+    vel_thresholds = np.atleast_1d(velocity_threshold)
+    if len(vel_thresholds) == 1:
+        vel_thresholds = np.full(num_voices, vel_thresholds[0])
+
     # Create MIDI file
     mid = MidiFile()
     ticks_per_beat = 480
@@ -492,9 +497,10 @@ def save_motion_outputs_as_midi(
             down_sum = np.dot(down_bits, down_weights)
             motion = up_sum - down_sum
 
-            # Compute velocity from outputs 6-7
+            # Compute velocity from outputs 6-7 (use per-voice threshold)
             vel_raw = outputs[6] * outputs[7]
-            vel_active = vel_raw > velocity_threshold
+            voice_threshold = vel_thresholds[voice_idx]
+            vel_active = vel_raw > voice_threshold
 
             # Apply motion (wrap modulo 12 within octave)
             if motion != 0:
@@ -511,7 +517,7 @@ def save_motion_outputs_as_midi(
             vel_min, vel_max = velocity_range
             if vel_active:
                 # Map (threshold, 1.0) -> (vel_min, vel_max)
-                vel_normalized = (vel_raw - velocity_threshold) / (1 - velocity_threshold)
+                vel_normalized = (vel_raw - voice_threshold) / (1 - voice_threshold + 1e-6)
                 midi_velocity = int(vel_min + vel_normalized * (vel_max - vel_min))
                 midi_velocity = np.clip(midi_velocity, vel_min, vel_max)
             else:
@@ -574,7 +580,7 @@ def save_motion_outputs_as_midi(
     print(f"  Voices: {num_voices}")
     print(f"  Encoding: motion [u1,u4,u7,d1,d3,d8,v1,v2]")
     print(f"  Start pitches: {start_pitches[:num_voices]}")
-    print(f"  Velocity threshold: {velocity_threshold:.3f}")
+    print(f"  Velocity thresholds: {[f'{t:.3f}' for t in vel_thresholds]}")
     print(f"  Velocity range: {velocity_range[0]}-{velocity_range[1]}")
 
     return filename
