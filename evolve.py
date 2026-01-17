@@ -414,6 +414,14 @@ def run_evolution(
         population = [ind for ind, r in sorted_pairs]
         results = [r for ind, r in sorted_pairs]
 
+        # Show initial population stats
+        best_result = results[0]
+        print(
+            f"Initial best: {best_result.fitness:.4f} | "
+            f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} | "
+            f"notes:{best_result.note_count}"
+        )
+
         # Track history
         history = []
         best_ever_fitness = max(r.fitness for r in results)
