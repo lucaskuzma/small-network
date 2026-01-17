@@ -764,9 +764,10 @@ def create_motion_mapper(
         num_voices = output_history.shape[1]
 
         # Compute adaptive threshold PER VOICE (so quiet voices aren't drowned out)
+        # Using soft XOR: |v1 - v2|
         velocity_thresholds = np.zeros(num_voices)
         for v in range(num_voices):
-            vel_values = output_history[:, v, 6] * output_history[:, v, 7]
+            vel_values = np.abs(output_history[:, v, 6] - output_history[:, v, 7])
             velocity_thresholds[v] = min(
                 np.percentile(vel_values, velocity_percentile), 0.99
             )

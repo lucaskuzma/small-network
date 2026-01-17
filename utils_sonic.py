@@ -415,7 +415,7 @@ def save_motion_outputs_as_midi(
       Motion = (u1×1 + u4×4 + u7×7) - (d1×1 + d3×3 + d8×8)
       Range: -12 to +12 semitones
 
-      Velocity = v1 × v2 (soft AND, both must be active)
+      Velocity = |v1 - v2| (soft XOR, high when they differ)
       Note triggered when velocity > threshold.
 
     Behavior:
@@ -428,7 +428,7 @@ def save_motion_outputs_as_midi(
         output_history: numpy array of shape (T, num_voices, 8)
         filename: output MIDI filename
         tempo: beats per minute
-        velocity_threshold: minimum v1*v2 to trigger/sustain a note
+        velocity_threshold: minimum |v1-v2| to trigger/sustain a note
         start_pitches: starting MIDI note per voice (default: [48, 60, 72, 84] = C3-C6)
         velocity_range: (min, max) MIDI velocity range (default: 70-100 for narrow dynamics)
     """
@@ -497,8 +497,8 @@ def save_motion_outputs_as_midi(
             down_sum = np.dot(down_bits, down_weights)
             motion = up_sum - down_sum
 
-            # Compute velocity from outputs 6-7 (use per-voice threshold)
-            vel_raw = outputs[6] * outputs[7]
+            # Compute velocity from outputs 6-7 (soft XOR: high when they differ)
+            vel_raw = np.abs(outputs[6] - outputs[7])
             voice_threshold = vel_thresholds[voice_idx]
             vel_active = vel_raw > voice_threshold
 
