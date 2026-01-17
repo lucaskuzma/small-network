@@ -130,7 +130,7 @@ class EvolutionConfig:
     generations: int = 50
 
     # Simulation parameters
-    sim_steps: int = 256
+    sim_steps: int = 128
     tempo: int = 60
 
     # Mutation parameters
@@ -417,8 +417,8 @@ def run_evolution(
         parent_fitness_map = {}  # Track each offspring's parent fitness
         offspring_per_parent = config.lambda_ // config.mu
 
-        for parent in population:
-            parent_result = results[population.index(parent)]
+        for parent_idx, parent in enumerate(population):
+            parent_result = results[parent_idx]
             for _ in range(offspring_per_parent):
                 child = parent.mutate_to_child(
                     current_generation=current_gen,
