@@ -709,7 +709,8 @@ def create_pitch_class_mapper(
 
 def create_motion_mapper(
     start_pitches: list[int] = [48, 60, 72, 84],
-    velocity_threshold: float = 0.3,
+    velocity_percentile: int = 80,
+    velocity_range: tuple[int, int] = (70, 100),
 ) -> Callable[..., str]:
     """
     Create a mapper for motion encoding (8-output scheme).
@@ -718,6 +719,11 @@ def create_motion_mapper(
     Motion = (u1 + u4×4 + u7×7) - (d1 + d3×3 + d8×8)
     Velocity = v1 × v2 (soft AND)
 
+    Args:
+        start_pitches: Starting MIDI note per voice
+        velocity_percentile: Percentile threshold for velocity (adaptive to signal)
+        velocity_range: (min, max) MIDI velocity range for dynamics
+
     Voices start at unison (C) in their respective octaves.
     Pitch wraps modulo 12 within each octave.
     No note until first motion; sustain when velocity high but motion = 0.
@@ -725,12 +731,20 @@ def create_motion_mapper(
     from utils_sonic import save_motion_outputs_as_midi
 
     def mapper(output_history: np.ndarray, filename: str, tempo: int) -> str:
+        # Compute velocity values (v1 * v2) across all voices and timesteps
+        # Outputs 6 and 7 are v1 and v2
+        vel_values = output_history[:, :, 6] * output_history[:, :, 7]
+
+        # Compute adaptive threshold from percentile
+        velocity_threshold = min(np.percentile(vel_values, velocity_percentile), 0.99)
+
         save_motion_outputs_as_midi(
             output_history,
             filename=filename,
             tempo=tempo,
             velocity_threshold=velocity_threshold,
             start_pitches=start_pitches,
+            velocity_range=velocity_range,
         )
         return filename
 

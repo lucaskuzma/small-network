@@ -404,6 +404,7 @@ def save_motion_outputs_as_midi(
     tempo: int = 120,
     velocity_threshold: float = 0.3,
     start_pitches: list = None,
+    velocity_range: tuple = (70, 100),
 ):
     """
     Save network outputs as MIDI using motion encoding.
@@ -429,6 +430,7 @@ def save_motion_outputs_as_midi(
         tempo: beats per minute
         velocity_threshold: minimum v1*v2 to trigger/sustain a note
         start_pitches: starting MIDI note per voice (default: [48, 60, 72, 84] = C3-C6)
+        velocity_range: (min, max) MIDI velocity range (default: 70-100 for narrow dynamics)
     """
     from mido import Message, MidiFile, MidiTrack, MetaMessage
 
@@ -505,11 +507,13 @@ def save_motion_outputs_as_midi(
             # Determine target note
             target_note = base_pitch + pitch_class
 
-            # Compute MIDI velocity (0-127) from amount above threshold
+            # Compute MIDI velocity within range from amount above threshold
+            vel_min, vel_max = velocity_range
             if vel_active:
-                midi_velocity = int(
-                    np.clip((vel_raw - velocity_threshold) / (1 - velocity_threshold) * 127, 1, 127)
-                )
+                # Map (threshold, 1.0) -> (vel_min, vel_max)
+                vel_normalized = (vel_raw - velocity_threshold) / (1 - velocity_threshold)
+                midi_velocity = int(vel_min + vel_normalized * (vel_max - vel_min))
+                midi_velocity = np.clip(midi_velocity, vel_min, vel_max)
             else:
                 midi_velocity = 0
 
@@ -570,7 +574,8 @@ def save_motion_outputs_as_midi(
     print(f"  Voices: {num_voices}")
     print(f"  Encoding: motion [u1,u4,u7,d1,d3,d8,v1,v2]")
     print(f"  Start pitches: {start_pitches[:num_voices]}")
-    print(f"  Velocity threshold: {velocity_threshold}")
+    print(f"  Velocity threshold: {velocity_threshold:.3f}")
+    print(f"  Velocity range: {velocity_range[0]}-{velocity_range[1]}")
 
     return filename
 
