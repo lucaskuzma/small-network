@@ -95,17 +95,17 @@ class AmbientAnalyzer:
             min_note_density: Minimum notes per beat for full activity score
         """
         self.weights = weights or {
-            "modal": 0.12,
+            "modal": 0.22,
             "vocabulary": 0.08,
-            "stasis": 0.12,
+            "stasis": 0.02,
             "melodic_smooth": 0.12,
-            "harmonic_rhythm": 0.12,
+            "harmonic_rhythm": 0.02,
             "note_duration": 0.08,
             "consonance": 0.08,
             "independence": 0.03,
             "sparsity": 0.00,  # Disabled for now - seems buggy
             "cadence": 0.05,
-            "activity": 0.20,  # Strong penalty for silent/sparse networks
+            "activity": 0.30,  # Strong penalty for silent/sparse networks
         }
         self.ideal_pitch_classes = ideal_pitch_classes
         self.target_sparsity = target_sparsity

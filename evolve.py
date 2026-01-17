@@ -184,6 +184,8 @@ class EvalResult:
     total_firing_events: int
     mean_activation: float
     activity_trend: float  # ratio of 2nd/1st half firing (used for culling)
+    note_count: int = 0  # number of MIDI notes generated
+    note_density: float = 0.0  # notes per beat
     midi_path: Optional[str] = None
 
 
@@ -261,9 +263,13 @@ def evaluate_genotype(
         config.midi_mapper(output_history, temp_midi, config.tempo)
 
     # Evaluate fitness
+    note_count = 0
+    note_density = 0.0
     try:
         metrics = evaluate_ambient(temp_midi)
         fitness = metrics.composite_score
+        note_count = metrics.note_count
+        note_density = metrics.note_density
     except Exception as e:
         print(f"Evaluation error: {e}")
         fitness = 0.0
@@ -278,6 +284,8 @@ def evaluate_genotype(
         total_firing_events=total_firing_events,
         mean_activation=mean_activation,
         activity_trend=activity_trend,
+        note_count=note_count,
+        note_density=note_density,
         midi_path=midi_filename if save_midi else None,
     )
 
@@ -481,6 +489,7 @@ def run_evolution(
             f"Gen {current_gen:3d} | "
             f"Best: {stats.best_fitness:.4f} | "
             f"Mean: {stats.mean_fitness:.4f}±{stats.std_fitness:.4f} | "
+            f"notes:{best_result.note_count:3d} | "
             f"ρ:{stats.best_spectral_radius:.2f} | "
             f"{best_ind.id}{parent_info} age:{stats.best_age} | "
             f"div:{unique_lineages:2d} | "
