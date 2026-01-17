@@ -394,6 +394,188 @@ def save_readout_outputs_as_midi(
 
 
 # =======================================================================
+# Motion-based MIDI export
+# =======================================================================
+
+
+def save_motion_outputs_as_midi(
+    output_history: np.ndarray,
+    filename: str = "motion_output.mid",
+    tempo: int = 120,
+    velocity_threshold: float = 0.3,
+    start_pitches: list = None,
+):
+    """
+    Save network outputs as MIDI using motion encoding.
+
+    Output mapping per voice (8 outputs):
+      [u1, u4, u7, d1, d3, d8, v1, v2]
+
+      Motion = (u1×1 + u4×4 + u7×7) - (d1×1 + d3×3 + d8×8)
+      Range: -12 to +12 semitones
+
+      Velocity = v1 × v2 (soft AND, both must be active)
+      Note triggered when velocity > threshold.
+
+    Behavior:
+      - All voices start at unison (C), each in own octave
+      - No note triggered until first non-zero motion
+      - Pitch wraps modulo 12 within each voice's octave
+      - Sustain: note continues when velocity high but motion = 0
+
+    Args:
+        output_history: numpy array of shape (T, num_voices, 8)
+        filename: output MIDI filename
+        tempo: beats per minute
+        velocity_threshold: minimum v1*v2 to trigger/sustain a note
+        start_pitches: starting MIDI note per voice (default: [48, 60, 72, 84] = C3-C6)
+    """
+    from mido import Message, MidiFile, MidiTrack, MetaMessage
+
+    # Parse output_history shape
+    if len(output_history.shape) != 3 or output_history.shape[2] != 8:
+        raise ValueError(
+            f"output_history must be 3D with 8 outputs per voice (T, voices, 8), "
+            f"got shape {output_history.shape}"
+        )
+
+    num_steps, num_voices, _ = output_history.shape
+
+    # Default start pitches - each voice gets its own octave, all start at C
+    if start_pitches is None:
+        start_pitches = [48, 60, 72, 84]  # C3, C4, C5, C6
+
+    # Ensure we have enough start pitches
+    while len(start_pitches) < num_voices:
+        start_pitches.append(start_pitches[-1] + 12)
+
+    # Motion weights: up = [1, 4, 7], down = [1, 3, 8]
+    up_weights = np.array([1, 4, 7])
+    down_weights = np.array([1, 3, 8])
+
+    # Create MIDI file
+    mid = MidiFile()
+    ticks_per_beat = 480
+    mid.ticks_per_beat = ticks_per_beat
+
+    # Calculate ticks per 16th note
+    ticks_per_16th = ticks_per_beat // 4
+
+    # Process each voice on separate track
+    for voice_idx in range(num_voices):
+        track = MidiTrack()
+        mid.tracks.append(track)
+
+        # Add metadata
+        track.append(MetaMessage("track_name", name=f"Voice {voice_idx + 1}", time=0))
+        if voice_idx == 0:
+            microseconds_per_beat = int(60_000_000 / tempo)
+            track.append(MetaMessage("set_tempo", tempo=microseconds_per_beat, time=0))
+
+        # Voice state
+        base_pitch = start_pitches[voice_idx]  # Base of this voice's octave
+        pitch_class = 0  # Start at C (0) within the octave
+        current_note = None  # Currently playing MIDI note (or None)
+        has_moved = False  # Track if voice has ever moved (no note until first motion)
+        current_absolute_time = 0
+
+        for step_idx in range(num_steps):
+            step_time = step_idx * ticks_per_16th
+            outputs = output_history[step_idx, voice_idx, :]
+
+            # Compute motion from outputs 0-5
+            up_bits = (outputs[0:3] > 0.5).astype(int)
+            down_bits = (outputs[3:6] > 0.5).astype(int)
+            up_sum = np.dot(up_bits, up_weights)
+            down_sum = np.dot(down_bits, down_weights)
+            motion = up_sum - down_sum
+
+            # Compute velocity from outputs 6-7
+            vel_raw = outputs[6] * outputs[7]
+            vel_active = vel_raw > velocity_threshold
+
+            # Apply motion (wrap modulo 12 within octave)
+            if motion != 0:
+                has_moved = True
+                pitch_class = (pitch_class + motion) % 12
+                # Handle negative modulo correctly
+                if pitch_class < 0:
+                    pitch_class += 12
+
+            # Determine target note
+            target_note = base_pitch + pitch_class
+
+            # Compute MIDI velocity (0-127) from amount above threshold
+            if vel_active:
+                midi_velocity = int(
+                    np.clip((vel_raw - velocity_threshold) / (1 - velocity_threshold) * 127, 1, 127)
+                )
+            else:
+                midi_velocity = 0
+
+            # Note logic
+            if vel_active and has_moved:
+                if current_note is None:
+                    # Start new note
+                    delta = step_time - current_absolute_time
+                    track.append(
+                        Message("note_on", note=target_note, velocity=midi_velocity,
+                                time=delta, channel=voice_idx)
+                    )
+                    current_absolute_time = step_time
+                    current_note = target_note
+
+                elif motion != 0 and target_note != current_note:
+                    # Pitch changed - end old note, start new
+                    delta = step_time - current_absolute_time
+                    track.append(
+                        Message("note_off", note=current_note, velocity=0,
+                                time=delta, channel=voice_idx)
+                    )
+                    track.append(
+                        Message("note_on", note=target_note, velocity=midi_velocity,
+                                time=0, channel=voice_idx)
+                    )
+                    current_absolute_time = step_time
+                    current_note = target_note
+                # else: sustain (motion=0 or same pitch) - do nothing
+
+            elif not vel_active and current_note is not None:
+                # Velocity dropped below threshold - end note
+                delta = step_time - current_absolute_time
+                track.append(
+                    Message("note_off", note=current_note, velocity=0,
+                            time=delta, channel=voice_idx)
+                )
+                current_absolute_time = step_time
+                current_note = None
+
+        # End any remaining note
+        if current_note is not None:
+            final_time = num_steps * ticks_per_16th
+            delta = final_time - current_absolute_time
+            track.append(
+                Message("note_off", note=current_note, velocity=0,
+                        time=delta, channel=voice_idx)
+            )
+            current_absolute_time = final_time
+
+        track.append(MetaMessage("end_of_track", time=0))
+
+    # Save MIDI file
+    mid.save(filename)
+    print(f"MIDI file saved to: {filename}")
+    print(f"  Tempo: {tempo} BPM")
+    print(f"  Duration: {num_steps} steps ({num_steps * ticks_per_16th} ticks)")
+    print(f"  Voices: {num_voices}")
+    print(f"  Encoding: motion [u1,u4,u7,d1,d3,d8,v1,v2]")
+    print(f"  Start pitches: {start_pitches[:num_voices]}")
+    print(f"  Velocity threshold: {velocity_threshold}")
+
+    return filename
+
+
+# =======================================================================
 # MIDI playback
 # =======================================================================
 

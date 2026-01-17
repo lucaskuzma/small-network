@@ -17,8 +17,21 @@ from typing import Optional, Union
 from tqdm import tqdm
 
 from network import NeuralNetwork, NetworkGenotype
-from utils_sonic import save_readout_outputs_as_midi
 from eval_ambient import evaluate_ambient
+from typing import Callable, Protocol
+
+
+class MidiMapper(Protocol):
+    """Protocol for converting network outputs to MIDI."""
+
+    def __call__(
+        self,
+        output_history: np.ndarray,  # (T, num_readouts, n_outputs_per_readout)
+        filename: str,
+        tempo: int,
+    ) -> str:
+        """Convert outputs to MIDI file, return path."""
+        ...
 
 
 # =============================================================================
@@ -116,11 +129,9 @@ class EvolutionConfig:
     lambda_: int = 100  # Number of offspring per generation
     generations: int = 50
 
-    # Simulation parameters (from exp_outputs.py)
+    # Simulation parameters
     sim_steps: int = 256
     tempo: int = 60
-    percentile: int = 95  # For voice thresholds
-    base_notes: list = field(default_factory=lambda: [48, 60, 72, 84])  # C3, C4, C5, C6
 
     # Mutation parameters
     weight_mutation_rate: float = 0.1
@@ -133,6 +144,10 @@ class EvolutionConfig:
     output_dir: str = "evolve_midi"
     save_every_n_generations: int = 5  # Save best MIDI every N generations
     random_seed: Optional[int] = None
+
+    # Output mapping (injected) - converts network outputs to MIDI
+    # If None, must be set before running evolution
+    midi_mapper: Optional[Callable[..., str]] = None
 
 
 # =============================================================================
@@ -213,35 +228,22 @@ def evaluate_genotype(
             midi_path=None,
         )
 
-    # Compute voice thresholds (same as exp_outputs.py)
-    # Cap at 0.99 to handle saturated outputs (values clip at 1.0, so 95th percentile can be 1.0)
-    voice_thresholds = np.zeros(num_readouts)
-    for r in range(num_readouts):
-        voice_data = output_history[:, r, :]
-        voice_thresholds[r] = min(np.percentile(voice_data, config.percentile), 0.99)
+    # Convert outputs to MIDI using injected mapper
+    if config.midi_mapper is None:
+        raise ValueError(
+            "EvolutionConfig.midi_mapper must be set before running evolution"
+        )
 
     # Save MIDI (suppress verbose output)
     if save_midi and midi_filename:
         os.makedirs(os.path.dirname(midi_filename), exist_ok=True)
         with suppress_stdout():
-            save_readout_outputs_as_midi(
-                output_history,
-                filename=midi_filename,
-                tempo=config.tempo,
-                threshold=voice_thresholds,
-                base_notes=config.base_notes,
-            )
+            config.midi_mapper(output_history, midi_filename, config.tempo)
 
     # Create temporary MIDI for evaluation (suppress verbose output)
     temp_midi = f"/tmp/evolve_eval_{os.getpid()}_{id(genotype)}.mid"
     with suppress_stdout():
-        save_readout_outputs_as_midi(
-            output_history,
-            filename=temp_midi,
-            tempo=config.tempo,
-            threshold=voice_thresholds,
-            base_notes=config.base_notes,
-        )
+        config.midi_mapper(output_history, temp_midi, config.tempo)
 
     # Evaluate fitness
     try:
@@ -628,6 +630,73 @@ def plot_evolution_history(
 
 
 # =============================================================================
+# Mapper Factories
+# =============================================================================
+
+
+def create_pitch_class_mapper(
+    base_notes: list[int] = [48, 60, 72, 84],
+    percentile: int = 95,
+) -> Callable[..., str]:
+    """
+    Create a mapper for pitch-class encoding (original 12-output scheme).
+
+    Each of 12 outputs per voice maps to a chromatic pitch class.
+    Notes triggered when output exceeds percentile-based threshold.
+    """
+    from utils_sonic import save_readout_outputs_as_midi
+
+    def mapper(output_history: np.ndarray, filename: str, tempo: int) -> str:
+        num_readouts = output_history.shape[1]
+        # Compute voice thresholds (percentile-based, capped at 0.99)
+        voice_thresholds = np.zeros(num_readouts)
+        for r in range(num_readouts):
+            voice_data = output_history[:, r, :]
+            voice_thresholds[r] = min(np.percentile(voice_data, percentile), 0.99)
+
+        save_readout_outputs_as_midi(
+            output_history,
+            filename=filename,
+            tempo=tempo,
+            threshold=voice_thresholds,
+            base_notes=base_notes,
+        )
+        return filename
+
+    return mapper
+
+
+def create_motion_mapper(
+    start_pitches: list[int] = [48, 60, 72, 84],
+    velocity_threshold: float = 0.3,
+) -> Callable[..., str]:
+    """
+    Create a mapper for motion encoding (8-output scheme).
+
+    Outputs per voice: [u1, u4, u7, d1, d3, d8, v1, v2]
+    Motion = (u1 + u4×4 + u7×7) - (d1 + d3×3 + d8×8)
+    Velocity = v1 × v2 (soft AND)
+
+    Voices start at unison (C) in their respective octaves.
+    Pitch wraps modulo 12 within each octave.
+    No note until first motion; sustain when velocity high but motion = 0.
+    """
+    from utils_sonic import save_motion_outputs_as_midi
+
+    def mapper(output_history: np.ndarray, filename: str, tempo: int) -> str:
+        save_motion_outputs_as_midi(
+            output_history,
+            filename=filename,
+            tempo=tempo,
+            velocity_threshold=velocity_threshold,
+            start_pitches=start_pitches,
+        )
+        return filename
+
+    return mapper
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -680,19 +749,24 @@ if __name__ == "__main__":
         checkpoint = Checkpoint.load(args.resume)
         config = checkpoint.config
 
+        # Ensure midi_mapper is set (checkpoints from old versions may not have it)
+        if config.midi_mapper is None:
+            config.midi_mapper = create_pitch_class_mapper()
+
         best_genotype, history = run_evolution(
             config,
             resume_from=checkpoint,
             additional_generations=args.generations,
         )
     else:
-        # Fresh run
+        # Fresh run with pitch-class mapper (default behavior)
         config = EvolutionConfig(
             mu=20,
             lambda_=100,
             generations=args.generations,
             random_seed=42,
             save_every_n_generations=5,
+            midi_mapper=create_pitch_class_mapper(),
         )
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
