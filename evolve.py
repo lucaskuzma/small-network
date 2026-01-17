@@ -18,6 +18,7 @@ from tqdm import tqdm
 
 from network import NeuralNetwork, NetworkGenotype
 from eval_ambient import evaluate_ambient
+from eval_basic import evaluate_basic
 from typing import Callable, Protocol
 
 
@@ -149,6 +150,9 @@ class EvolutionConfig:
     # "pitch" = 12 chromatic outputs, "motion" = 8 motion outputs
     encoding: str = "pitch"
 
+    # Evaluator: "ambient" (full) or "basic" (just modal + activity)
+    evaluator: str = "basic"
+
     # Transient (not pickled) - recreated from encoding on load
     _midi_mapper: Optional[Callable[..., str]] = field(default=None, repr=False)
 
@@ -186,6 +190,8 @@ class EvalResult:
     activity_trend: float  # ratio of 2nd/1st half firing (used for culling)
     note_count: int = 0  # number of MIDI notes generated
     note_density: float = 0.0  # notes per beat
+    modal_consistency: float = 0.0  # 0-1, how well notes fit a scale
+    activity: float = 0.0  # 0-1, based on note density
     midi_path: Optional[str] = None
 
 
@@ -262,14 +268,27 @@ def evaluate_genotype(
     with suppress_stdout():
         config.midi_mapper(output_history, temp_midi, config.tempo)
 
-    # Evaluate fitness
+    # Evaluate fitness using chosen evaluator
     note_count = 0
     note_density = 0.0
+    modal_consistency = 0.0
+    activity = 0.0
     try:
-        metrics = evaluate_ambient(temp_midi)
-        fitness = metrics.composite_score
-        note_count = metrics.note_count
-        note_density = metrics.note_density
+        if config.evaluator == "basic":
+            metrics = evaluate_basic(temp_midi)
+            fitness = metrics.composite_score
+            note_count = metrics.note_count
+            note_density = metrics.note_density
+            modal_consistency = metrics.modal_consistency
+            activity = metrics.activity
+        else:
+            # Default to ambient
+            metrics = evaluate_ambient(temp_midi)
+            fitness = metrics.composite_score
+            note_count = metrics.note_count
+            note_density = metrics.note_density
+            modal_consistency = metrics.modal_consistency
+            activity = metrics.activity
     except Exception as e:
         print(f"Evaluation error: {e}")
         fitness = 0.0
@@ -286,6 +305,8 @@ def evaluate_genotype(
         activity_trend=activity_trend,
         note_count=note_count,
         note_density=note_density,
+        modal_consistency=modal_consistency,
+        activity=activity,
         midi_path=midi_filename if save_midi else None,
     )
 
@@ -518,7 +539,7 @@ def run_evolution(
         tqdm.write(
             f"Gen {current_gen:3d} | "
             f"Best: {stats.best_fitness:.4f} | "
-            f"Mean: {stats.mean_fitness:.4f}±{stats.std_fitness:.4f} | "
+            f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} | "
             f"notes:{best_result.note_count:3d} | "
             f"[{survival_str}]{inject_str} | "
             f"div:{unique_lineages:2d}"
@@ -848,6 +869,13 @@ if __name__ == "__main__":
         default="pitch",
         help="Output encoding: 'pitch' (12 chromatic outputs) or 'motion' (8 motion outputs)",
     )
+    parser.add_argument(
+        "--eval",
+        type=str,
+        choices=["basic", "ambient"],
+        default="basic",
+        help="Evaluator: 'basic' (modal + activity only) or 'ambient' (full heuristics)",
+    )
     args = parser.parse_args()
 
     if args.resume:
@@ -855,9 +883,11 @@ if __name__ == "__main__":
         checkpoint = Checkpoint.load(args.resume)
         config = checkpoint.config
 
-        # Handle old checkpoints without encoding field
+        # Handle old checkpoints without encoding/evaluator fields
         if not hasattr(config, "encoding") or config.encoding is None:
             config.encoding = "pitch"
+        if not hasattr(config, "evaluator") or config.evaluator is None:
+            config.evaluator = "basic"
 
         best_genotype, history = run_evolution(
             config,
@@ -876,6 +906,7 @@ if __name__ == "__main__":
             random_seed=42,
             save_every_n_generations=5,
             encoding=args.encoding,
+            evaluator=args.eval,
         )
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -883,6 +914,7 @@ if __name__ == "__main__":
 
         # Create initial population with correct output size
         print(f"Encoding: {args.encoding} ({n_outputs} outputs per voice)")
+        print(f"Evaluator: {args.eval}")
         np.random.seed(config.random_seed)
 
         initial_population = [
