@@ -46,6 +46,9 @@ class AmbientMetrics:
     sparsity: float  # 0-1, average fraction of voices silent
     voice_independence: float  # 0-1, avoid parallel motion
     cadence_penalty: float  # 0-1, penalize V-I motion (1 = no cadences)
+    activity: float  # 0-1, penalize sparse networks (based on note density)
+    note_density: float  # notes per beat
+    note_count: int  # raw number of notes
     composite_score: float  # weighted combination
 
     def __str__(self) -> str:
@@ -53,6 +56,7 @@ class AmbientMetrics:
         return (
             f"AmbientMetrics(\n"
             f"  composite_score: {self.composite_score:.3f}\n"
+            f"  activity: {self.activity:.3f} ({self.note_count} notes, {self.note_density:.2f}/beat)\n"
             f"  modal_consistency: {self.modal_consistency:.3f} ({root_names[self.best_root]} {self.best_scale})\n"
             f"  pitch_vocabulary: {self.pitch_vocabulary} classes (score: {self.pitch_vocabulary_score:.3f})\n"
             f"  voice_stasis: {self.voice_stasis:.3f}\n"
@@ -79,38 +83,46 @@ class AmbientAnalyzer:
         weights: Optional[dict] = None,
         ideal_pitch_classes: Tuple[int, int] = (4, 7),
         target_sparsity: float = 0.5,
+        min_note_density: float = 0.5,
     ):
         """
         Args:
             weights: Dict of metric weights for composite score.
                      Keys: modal, vocabulary, stasis, melodic_smooth, harmonic_rhythm,
-                           note_duration, consonance, independence, sparsity, cadence
+                           note_duration, consonance, independence, sparsity, cadence, activity
             ideal_pitch_classes: (min, max) ideal number of pitch classes
             target_sparsity: Target fraction of voices silent (0-1)
+            min_note_density: Minimum notes per beat for full activity score
         """
         self.weights = weights or {
-            "modal": 0.15,
-            "vocabulary": 0.10,
-            "stasis": 0.15,
-            "melodic_smooth": 0.15,
-            "harmonic_rhythm": 0.15,
-            "note_duration": 0.10,
-            "consonance": 0.10,
-            "independence": 0.05,
+            "modal": 0.12,
+            "vocabulary": 0.08,
+            "stasis": 0.12,
+            "melodic_smooth": 0.12,
+            "harmonic_rhythm": 0.12,
+            "note_duration": 0.08,
+            "consonance": 0.08,
+            "independence": 0.03,
             "sparsity": 0.00,  # Disabled for now - seems buggy
             "cadence": 0.05,
+            "activity": 0.20,  # Strong penalty for silent/sparse networks
         }
         self.ideal_pitch_classes = ideal_pitch_classes
         self.target_sparsity = target_sparsity
+        self.min_note_density = min_note_density
 
-    def load_midi(self, midi_path: str) -> List[dict]:
+    def load_midi(self, midi_path: str) -> Tuple[List[dict], int, int]:
         """
         Load MIDI file and extract note events.
 
-        Returns list of note events: {pitch, start_tick, end_tick, channel}
+        Returns:
+            notes: list of note events {pitch, start_tick, end_tick, channel}
+            duration_ticks: total duration in ticks
+            ticks_per_beat: MIDI resolution
         """
         mid = mido.MidiFile(midi_path)
         notes = []
+        max_tick = 0
 
         for track_idx, track in enumerate(mid.tracks):
             current_tick = 0
@@ -139,7 +151,13 @@ class AmbientAnalyzer:
                         )
                         del active_notes[key]
 
-        return sorted(notes, key=lambda x: x["start_tick"])
+            max_tick = max(max_tick, current_tick)
+
+        return (
+            sorted(notes, key=lambda x: x["start_tick"]),
+            max_tick,
+            mid.ticks_per_beat,
+        )
 
     def get_pitch_classes(self, notes: List[dict]) -> List[int]:
         """Extract pitch classes (0-11) from note list."""
@@ -524,6 +542,35 @@ class AmbientAnalyzer:
 
         return 1 - (total_penalties / total_comparisons)
 
+    def compute_activity(
+        self, notes: List[dict], duration_ticks: int, ticks_per_beat: int
+    ) -> Tuple[float, float]:
+        """
+        Compute activity score based on note density (notes per beat).
+
+        Returns: (activity_score, note_density)
+            activity_score: 0-1 (0 = silent, 1 = enough activity)
+            note_density: notes per beat
+        """
+        note_count = len(notes)
+
+        if note_count == 0 or duration_ticks == 0:
+            return 0.0, 0.0
+
+        # Compute duration in beats
+        duration_beats = duration_ticks / ticks_per_beat
+
+        # Note density = notes per beat
+        note_density = note_count / duration_beats
+
+        if note_density >= self.min_note_density:
+            return 1.0, note_density
+
+        # Ramp from 0 to 1 as density approaches min_note_density
+        # Use sqrt for gentler ramp
+        score = np.sqrt(note_density / self.min_note_density)
+        return score, note_density
+
     def analyze(self, midi_path: str) -> AmbientMetrics:
         """
         Analyze a MIDI file and return ambient metrics.
@@ -534,7 +581,7 @@ class AmbientAnalyzer:
         Returns:
             AmbientMetrics dataclass with all scores
         """
-        notes = self.load_midi(midi_path)
+        notes, duration_ticks, ticks_per_beat = self.load_midi(midi_path)
 
         if not notes:
             return AmbientMetrics(
@@ -551,6 +598,9 @@ class AmbientAnalyzer:
                 sparsity=0.0,
                 voice_independence=0.0,
                 cadence_penalty=0.0,
+                activity=0.0,
+                note_density=0.0,
+                note_count=0,
                 composite_score=0.0,
             )
 
@@ -567,6 +617,9 @@ class AmbientAnalyzer:
         sparsity = self.compute_sparsity(notes)
         independence = self.compute_voice_independence(notes)
         cadence = self.compute_cadence_penalty(notes)
+        activity, note_density = self.compute_activity(
+            notes, duration_ticks, ticks_per_beat
+        )
 
         # Weighted composite
         composite = (
@@ -580,6 +633,7 @@ class AmbientAnalyzer:
             + self.weights["sparsity"] * sparsity
             + self.weights["independence"] * independence
             + self.weights["cadence"] * cadence
+            + self.weights["activity"] * activity
         )
 
         return AmbientMetrics(
@@ -596,6 +650,9 @@ class AmbientAnalyzer:
             sparsity=sparsity,
             voice_independence=independence,
             cadence_penalty=cadence,
+            activity=activity,
+            note_density=note_density,
+            note_count=len(notes),
             composite_score=composite,
         )
 
