@@ -57,7 +57,7 @@ class BasicAnalyzer:
         self,
         modal_weight: float = 0.5,
         activity_weight: float = 0.5,
-        min_note_density: float = 0.5,
+        min_note_density: float = 4,
     ):
         """
         Args:
@@ -154,22 +154,26 @@ class BasicAnalyzer:
         self, notes: List[dict], duration_ticks: int, ticks_per_beat: int
     ) -> Tuple[float, float]:
         """
-        Compute activity score based on note density (notes per beat).
+        Compute activity score based on note density (notes per beat per voice).
 
         Returns: (activity_score, note_density)
             activity_score: 0-1 (0 = silent, 1 = enough activity)
-            note_density: notes per beat
+            note_density: notes per beat per voice
         """
         note_count = len(notes)
 
         if note_count == 0 or duration_ticks == 0:
             return 0.0, 0.0
 
+        # Count number of voices
+        voices = set((n["track"], n["channel"]) for n in notes)
+        num_voices = max(len(voices), 1)
+
         # Compute duration in beats
         duration_beats = duration_ticks / ticks_per_beat
 
-        # Note density = notes per beat
-        note_density = note_count / duration_beats
+        # Note density = notes per beat PER VOICE
+        note_density = note_count / duration_beats / num_voices
 
         if note_density >= self.min_note_density:
             return 1.0, note_density
@@ -240,4 +244,3 @@ if __name__ == "__main__":
 
     metrics = evaluate_basic(sys.argv[1])
     print(metrics)
-
