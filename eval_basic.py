@@ -121,12 +121,12 @@ class BasicAnalyzer:
         self, pitch_classes: List[int]
     ) -> Tuple[float, str, int]:
         """
-        Find best-fitting scale and return consistency score.
+        Find best-fitting scale, normalized so random chromatic ≈ 0.
 
         For each of 12 roots × 11 scales, count what fraction of played notes
-        fit the scale. Return the best fit.
+        fit the scale. Normalize against random baseline (7/12 for 7-note scales).
 
-        Returns: (score, scale_name, root)
+        Returns: (normalized_score, scale_name, root)
         """
         if not pitch_classes:
             return 0.0, "none", 0  # No notes = no modal consistency
@@ -148,7 +148,12 @@ class BasicAnalyzer:
                     best_scale = scale_name
                     best_root = root
 
-        return best_fit, best_scale, best_root
+        # Normalize: random chromatic ≈ 7/12 (0.583) for 7-note scales
+        # score = (fit - baseline) / (1 - baseline), so random → 0, perfect → 1
+        baseline = 7 / 12
+        normalized = max(0, (best_fit - baseline) / (1 - baseline))
+
+        return normalized, best_scale, best_root
 
     def compute_activity(
         self, notes: List[dict], duration_ticks: int, ticks_per_beat: int
