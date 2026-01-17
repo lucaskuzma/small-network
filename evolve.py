@@ -136,7 +136,7 @@ class EvolutionConfig:
 
     # Mutation parameters
     weight_mutation_rate: float = 0.1
-    weight_mutation_scale: float = 0.1
+    weight_mutation_scale: float = 0.5
     threshold_mutation_rate: float = 0.1
     threshold_mutation_scale: float = 0.1
     refraction_mutation_rate: float = 0.05
