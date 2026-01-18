@@ -766,7 +766,7 @@ def create_pitch_class_mapper(
 
 def create_motion_mapper(
     start_pitches: list[int] = [48, 60, 72, 84],
-    velocity_percentile: int = 80,
+    velocity_percentile: int = 50,
     velocity_range: tuple[int, int] = (70, 100),
 ) -> Callable[..., str]:
     """
@@ -774,11 +774,11 @@ def create_motion_mapper(
 
     Outputs per voice: [u1, u4, u7, d1, d3, d8, v1, v2]
     Motion = (u1 + u4×4 + u7×7) - (d1 + d3×3 + d8×8)
-    Velocity = v1 × v2 (soft AND)
+    Velocity = |v1 - v2| (soft XOR)
 
     Args:
         start_pitches: Starting MIDI note per voice
-        velocity_percentile: Percentile threshold for velocity (adaptive to signal)
+        velocity_percentile: Threshold as % of peak velocity (e.g., 50 = half of peak)
         velocity_range: (min, max) MIDI velocity range for dynamics
 
     Voices start at unison (C) in their respective octaves.
@@ -792,14 +792,14 @@ def create_motion_mapper(
         # Outputs 6 and 7 are v1 and v2
         num_voices = output_history.shape[1]
 
-        # Compute adaptive threshold PER VOICE (so quiet voices aren't drowned out)
-        # Using soft XOR: |v1 - v2|
+        # Compute adaptive threshold PER VOICE using peak-relative method
+        # threshold = X% of peak velocity (not percentile of occurrences)
+        # This lets the network control note density, not the threshold
         velocity_thresholds = np.zeros(num_voices)
         for v in range(num_voices):
             vel_values = np.abs(output_history[:, v, 6] - output_history[:, v, 7])
-            velocity_thresholds[v] = min(
-                np.percentile(vel_values, velocity_percentile), 0.99
-            )
+            peak_vel = np.max(vel_values) if len(vel_values) > 0 else 1.0
+            velocity_thresholds[v] = peak_vel * (velocity_percentile / 100.0)
 
         save_motion_outputs_as_midi(
             output_history,
