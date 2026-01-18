@@ -435,7 +435,14 @@ def run_evolution(
     print(f"  Output directory: {config.output_dir}")
     print("-" * 100)
 
+    # Track improvement sources
+    improvements_from_mutation = 0
+    improvements_from_injection = 0
+    last_saved_fitness = 0.0  # Track to avoid duplicate saves
+
     for current_gen in range(start_gen + 1, total_generations + 1):
+        prev_best_id = population[0].id if population else None
+        prev_best_fitness = results[0].fitness if results else 0.0
         # Generate offspring via mutation (constant rates)
         offspring = []
         offspring_per_parent = config.lambda_ // config.mu
@@ -516,6 +523,22 @@ def run_evolution(
         )
         history.append(stats)
 
+        # Track if best improved and from what source
+        best_improved = fitnesses[0] > prev_best_fitness
+        improvement_source = ""
+        if best_improved:
+            new_best = population[0]
+            if new_best.id != prev_best_id:
+                # New individual became best - was it from mutation or will it be from injection?
+                # Check if it's an offspring (has parent_id) vs a fresh random (parent_id is None after injection)
+                if new_best.parent_id is not None:
+                    improvements_from_mutation += 1
+                    improvement_source = "MUT"
+                else:
+                    # This shouldn't happen here since injection happens AFTER selection
+                    # But track it anyway
+                    improvement_source = "???"
+
         # Update best ever
         if fitnesses[0] > best_ever_fitness:
             best_ever_fitness = fitnesses[0]
@@ -524,6 +547,7 @@ def run_evolution(
         # Diversity injection: if population collapsed (almost all parents survived),
         # replace worst 25% with fresh random individuals
         num_inject = 0
+        injected_ids = set()
         if num_parents_survived >= config.mu - 2:  # Almost no turnover
             num_inject = config.mu // 4  # Replace 25%
             # Get network params from existing genotype
@@ -538,32 +562,53 @@ def run_evolution(
                     generation_born=current_gen,
                 )
                 population[-(i + 1)] = fresh
+                injected_ids.add(fresh.id)
                 # Re-evaluate the fresh individual
-                results[-(i + 1)] = evaluate_genotype(fresh.genotype, config)
+                fresh_result = evaluate_genotype(fresh.genotype, config)
+                results[-(i + 1)] = fresh_result
+
+                # Check if this injection became the new best
+                if fresh_result.fitness > best_ever_fitness:
+                    best_ever_fitness = fresh_result.fitness
+                    best_ever_individual = fresh
+                    improvements_from_injection += 1
+                    improvement_source = "INJ"
+                    # Update stats for display
+                    best_ind = fresh
+                    best_result = fresh_result
 
         # Progress output with survival visualization
         # ● = parent survived, ○ = replaced by offspring, + = injected fresh
         inject_str = f" +{num_inject}" if num_inject > 0 else ""
+        src_str = f" [{improvement_source}]" if improvement_source else ""
         tqdm.write(
             f"Gen {current_gen:3d} | "
             f"Best: {stats.best_fitness:.4f} | "
             f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} | "
             f"notes:{best_result.note_count:3d} | "
             f"[{survival_str}]{inject_str} | "
-            f"div:{unique_lineages:2d}"
+            f"age:{stats.best_age:2d} div:{unique_lineages:2d} | "
+            f"mut:{improvements_from_mutation} inj:{improvements_from_injection}{src_str}"
         )
 
-        # Save best MIDI and checkpoint periodically
+        # Save best MIDI and checkpoint periodically (only if fitness improved)
         is_last_gen = current_gen == total_generations
+        current_best_fitness = best_ever_fitness
         if current_gen % config.save_every_n_generations == 0 or is_last_gen:
-            midi_path = os.path.join(
-                config.output_dir,
-                f"gen{current_gen:03d}_best_{stats.best_fitness:.4f}.mid",
-            )
-            evaluate_genotype(
-                best_ind.genotype, config, save_midi=True, midi_filename=midi_path
-            )
-            tqdm.write(f"  → Saved: {midi_path}")
+            # Only save MIDI if fitness actually improved since last save
+            if current_best_fitness > last_saved_fitness:
+                midi_path = os.path.join(
+                    config.output_dir,
+                    f"gen{current_gen:03d}_best_{current_best_fitness:.4f}.mid",
+                )
+                evaluate_genotype(
+                    best_ever_individual.genotype,
+                    config,
+                    save_midi=True,
+                    midi_filename=midi_path,
+                )
+                tqdm.write(f"  → Saved: {midi_path}")
+                last_saved_fitness = current_best_fitness
 
             # Save checkpoint
             checkpoint = Checkpoint(
@@ -583,17 +628,20 @@ def run_evolution(
         f"Evolution complete! Best fitness: {best_ever_fitness:.4f} (ID: {best_ever_individual.id})"
     )
 
-    # Save final best
-    final_midi_path = os.path.join(
-        config.output_dir, f"final_best_{best_ever_fitness:.4f}.mid"
-    )
-    evaluate_genotype(
-        best_ever_individual.genotype,
-        config,
-        save_midi=True,
-        midi_filename=final_midi_path,
-    )
-    print(f"Final best saved to: {final_midi_path}")
+    # Save final best (only if improved since last periodic save)
+    if best_ever_fitness > last_saved_fitness:
+        final_midi_path = os.path.join(
+            config.output_dir, f"final_best_{best_ever_fitness:.4f}.mid"
+        )
+        evaluate_genotype(
+            best_ever_individual.genotype,
+            config,
+            save_midi=True,
+            midi_filename=final_midi_path,
+        )
+        print(f"Final best saved to: {final_midi_path}")
+    else:
+        print(f"Final best unchanged since last save")
 
     return best_ever_individual.genotype, history
 
@@ -911,7 +959,7 @@ if __name__ == "__main__":
             mu=20,
             lambda_=100,
             generations=args.generations,
-            random_seed=43,
+            random_seed=44,
             save_every_n_generations=5,
             encoding=args.encoding,
             evaluator=args.eval,
