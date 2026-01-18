@@ -121,6 +121,7 @@ def suppress_stdout():
 def _save_generation_plot(
     parent_fitnesses: list[float],
     offspring_fitnesses: list[float],
+    parent_from_injection: list[bool],
     gen: int,
     output_dir: str,
     best_fitness: float,
@@ -138,17 +139,27 @@ def _save_generation_plot(
     parent_x = np.linspace(0.1, 0.4, n_parents)
     offspring_x = np.linspace(0.55, 0.95, n_offspring)
 
-    # Parents (highlighted) - sorted by fitness so position = rank
+    # Parents - color by origin (green = original, orange = injection-descended)
+    parent_colors = ["#e67e22" if inj else "#2ecc71" for inj in parent_from_injection]
+    n_injected = sum(parent_from_injection)
+    n_original = n_parents - n_injected
+
     ax.scatter(
         parent_x,
         parent_fitnesses,
-        c="#2ecc71",
+        c=parent_colors,
         s=100,
         alpha=0.8,
-        label=f"Parents (n={n_parents})",
         edgecolors="black",
         linewidths=1,
         zorder=3,
+    )
+    # Dummy scatters for legend
+    ax.scatter(
+        [], [], c="#2ecc71", s=100, label=f"Original ({n_original})", edgecolors="black"
+    )
+    ax.scatter(
+        [], [], c="#e67e22", s=100, label=f"Injected ({n_injected})", edgecolors="black"
     )
 
     # Offspring
@@ -538,6 +549,7 @@ def run_evolution(
 
         # Capture parent and offspring fitnesses for visualization BEFORE combining
         parent_fitnesses = [r.fitness for r in results]
+        parent_from_injection = [ind.from_injection for ind in population]
         offspring_fitnesses_for_plot = [r.fitness for r in offspring_results]
 
         # Combine parents + offspring
@@ -672,6 +684,7 @@ def run_evolution(
         _save_generation_plot(
             parent_fitnesses=parent_fitnesses,
             offspring_fitnesses=offspring_fitnesses_for_plot,
+            parent_from_injection=parent_from_injection,
             gen=current_gen,
             output_dir=config.output_dir,
             best_fitness=best_ever_fitness,
