@@ -911,7 +911,7 @@ if __name__ == "__main__":
             mu=20,
             lambda_=100,
             generations=args.generations,
-            random_seed=42,
+            random_seed=43,
             save_every_n_generations=5,
             encoding=args.encoding,
             evaluator=args.eval,

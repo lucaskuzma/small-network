@@ -10,8 +10,10 @@ from tqdm import tqdm
 from network import NetworkGenotype
 from evolve import evaluate_genotype, EvolutionConfig
 
-def run_sanity_check(n_samples: int = 500, encoding: str = "motion"):
+def run_sanity_check(n_samples: int = 500, encoding: str = "motion", seed: int = 43):
     """Generate random networks and see what scores are achievable."""
+    
+    np.random.seed(seed)
     
     n_outputs = 8 if encoding == "motion" else 12
     config = EvolutionConfig(encoding=encoding, evaluator="basic")
