@@ -240,10 +240,10 @@ class EvolutionConfig:
     tempo: int = 60
 
     # Mutation parameters
-    weight_mutation_rate: float = 0.3
-    weight_mutation_scale: float = 1
-    threshold_mutation_rate: float = 0.3
-    threshold_mutation_scale: float = 1
+    weight_mutation_rate: float = 0.1
+    weight_mutation_scale: float = 0.05
+    threshold_mutation_rate: float = 0.1
+    threshold_mutation_scale: float = 0.05
     refraction_mutation_rate: float = 0.05
 
     # Output
