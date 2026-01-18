@@ -554,20 +554,21 @@ def run_evolution(
         prev_best_id = population[0].id if population else None
         prev_best_fitness = results[0].fitness if results else 0.0
 
-        # Generate offspring via mutation
+        # Generate offspring via mutation (round-robin until we hit target)
         offspring = []
-        offspring_per_parent = config.num_offspring // config.mu
-        for parent in population:
-            for _ in range(offspring_per_parent):
-                child = parent.mutate_to_child(
-                    current_generation=current_gen,
-                    weight_mutation_rate=config.weight_mutation_rate,
-                    weight_mutation_scale=config.weight_mutation_scale,
-                    threshold_mutation_rate=config.threshold_mutation_rate,
-                    threshold_mutation_scale=config.threshold_mutation_scale,
-                    refraction_mutation_rate=config.refraction_mutation_rate,
-                )
-                offspring.append(child)
+        parent_idx = 0
+        while len(offspring) < config.num_offspring:
+            parent = population[parent_idx % len(population)]
+            child = parent.mutate_to_child(
+                current_generation=current_gen,
+                weight_mutation_rate=config.weight_mutation_rate,
+                weight_mutation_scale=config.weight_mutation_scale,
+                threshold_mutation_rate=config.threshold_mutation_rate,
+                threshold_mutation_scale=config.threshold_mutation_scale,
+                refraction_mutation_rate=config.refraction_mutation_rate,
+            )
+            offspring.append(child)
+            parent_idx += 1
 
         # Generate fresh randoms
         randoms = []
