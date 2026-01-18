@@ -59,6 +59,7 @@ class Individual:
     id: str = field(default_factory=lambda: "")
     parent_id: Optional[str] = None
     generation_born: int = 0
+    from_injection: bool = False  # True if this individual or ancestor was injected
 
     def __post_init__(self):
         if not self.id:
@@ -73,6 +74,7 @@ class Individual:
             genotype=child_genotype,
             parent_id=self.id,
             generation_born=current_generation,
+            from_injection=self.from_injection,  # Inherit injection ancestry
         )
 
 
@@ -436,8 +438,9 @@ def run_evolution(
     print("-" * 100)
 
     # Track improvement sources
-    improvements_from_mutation = 0
-    improvements_from_injection = 0
+    improvements_from_mutation = 0  # Pure mutations from original population
+    improvements_from_mutation_inj = 0  # Mutations from injection-descended individuals
+    improvements_from_injection = 0  # Direct injections
     last_saved_fitness = 0.0  # Track to avoid duplicate saves
 
     for current_gen in range(start_gen + 1, total_generations + 1):
@@ -532,8 +535,13 @@ def run_evolution(
                 # New individual became best - was it from mutation or will it be from injection?
                 # Check if it's an offspring (has parent_id) vs a fresh random (parent_id is None after injection)
                 if new_best.parent_id is not None:
-                    improvements_from_mutation += 1
-                    improvement_source = "MUT"
+                    # Check if this mutation descended from an injection
+                    if new_best.from_injection:
+                        improvements_from_mutation_inj += 1
+                        improvement_source = "MUT*"  # Mutation of injection descendant
+                    else:
+                        improvements_from_mutation += 1
+                        improvement_source = "MUT"  # Pure mutation from original pop
                 else:
                     # This shouldn't happen here since injection happens AFTER selection
                     # But track it anyway
@@ -560,6 +568,7 @@ def run_evolution(
                         n_outputs_per_readout=ref_geno.n_outputs_per_readout,
                     ),
                     generation_born=current_gen,
+                    from_injection=True,  # Mark as injection-derived
                 )
                 population[-(i + 1)] = fresh
                 injected_ids.add(fresh.id)
@@ -588,7 +597,7 @@ def run_evolution(
             f"notes:{best_result.note_count:3d} | "
             f"[{survival_str}]{inject_str} | "
             f"age:{stats.best_age:2d} div:{unique_lineages:2d} | "
-            f"mut:{improvements_from_mutation} inj:{improvements_from_injection}{src_str}"
+            f"mut:{improvements_from_mutation} mut*:{improvements_from_mutation_inj} inj:{improvements_from_injection}{src_str}"
         )
 
         # Save best MIDI and checkpoint periodically (only if fitness improved)
