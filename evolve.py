@@ -669,8 +669,9 @@ def run_evolution(
         if best_improved:
             new_best = population[0]
             if new_best.id != prev_best_id:
-                # New individual became best - from mutation or random lineage?
-                if new_best.from_injection:
+                # New individual became best - was it created by mutation or fresh random?
+                # parent_id is None for fresh randoms, set for mutations
+                if new_best.parent_id is None:
                     improvements_from_random += 1
                     improvement_source = "RND"
                 else:
