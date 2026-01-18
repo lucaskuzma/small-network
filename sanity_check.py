@@ -11,7 +11,7 @@ from network import NetworkGenotype
 from evolve import evaluate_genotype, EvolutionConfig
 
 
-def run_sanity_check(n_samples: int = 500, encoding: str = "motion", seed: int = 44):
+def run_sanity_check(n_samples: int = 500, encoding: str = "motion", seed: int = 45):
     """Generate random networks and see what scores are achievable."""
 
     np.random.seed(seed)
@@ -49,7 +49,7 @@ def run_sanity_check(n_samples: int = 500, encoding: str = "motion", seed: int =
             best_activity = r.activity
             best_genotype = g
             tqdm.write(
-                f"  NEW BEST: {r.fitness:.4f} | "
+                f"  [{i+1:5d}] NEW BEST: {r.fitness:.4f} | "
                 f"modal:{r.modal_consistency:.2f} act:{r.activity:.2f} | "
                 f"notes:{r.note_count}"
             )

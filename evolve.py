@@ -118,6 +118,70 @@ def suppress_stdout():
             sys.stdout = old_stdout
 
 
+def _save_generation_plot(
+    parent_fitnesses: list[float],
+    offspring_fitnesses: list[float],
+    gen: int,
+    output_dir: str,
+    best_fitness: float,
+):
+    """Save PNG scatter plot of generation fitness distribution."""
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    n_parents = len(parent_fitnesses)
+    n_offspring = len(offspring_fitnesses)
+
+    # Deterministic X positions: evenly spaced within each group
+    # Parents on left (0.1 to 0.4), offspring on right (0.6 to 0.9)
+    parent_x = np.linspace(0.1, 0.4, n_parents)
+    offspring_x = np.linspace(0.55, 0.95, n_offspring)
+
+    # Parents (highlighted) - sorted by fitness so position = rank
+    ax.scatter(
+        parent_x,
+        parent_fitnesses,
+        c="#2ecc71",
+        s=100,
+        alpha=0.8,
+        label=f"Parents (n={n_parents})",
+        edgecolors="black",
+        linewidths=1,
+        zorder=3,
+    )
+
+    # Offspring
+    ax.scatter(
+        offspring_x,
+        offspring_fitnesses,
+        c="#3498db",
+        s=30,
+        alpha=0.5,
+        label=f"Offspring (n={n_offspring})",
+        zorder=2,
+    )
+
+    # Formatting - fixed axes for consistent animation frames
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_xticks([0.25, 0.75])
+    ax.set_xticklabels(["Parents (by rank)", "Offspring"])
+    ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+    ax.set_ylabel("Fitness Score")
+    ax.set_title(f"Generation {gen} | Best: {best_fitness:.4f}")
+    ax.legend(loc="upper right")
+    ax.axhline(y=best_fitness, color="#e74c3c", linestyle="--", alpha=0.7, label="Best")
+    ax.grid(axis="y", alpha=0.3)
+
+    # Save with fixed size (no bbox_inches='tight' to keep consistent dimensions)
+    plot_dir = os.path.join(output_dir, "generation_plots")
+    os.makedirs(plot_dir, exist_ok=True)
+    plot_path = os.path.join(plot_dir, f"gen_{gen:04d}.png")
+    plt.savefig(plot_path, dpi=100)
+    plt.close(fig)
+
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -472,6 +536,10 @@ def run_evolution(
         # Track previous generation's parent IDs for survival visualization
         prev_parent_ids = {ind.id for ind in population}
 
+        # Capture parent and offspring fitnesses for visualization BEFORE combining
+        parent_fitnesses = [r.fitness for r in results]
+        offspring_fitnesses_for_plot = [r.fitness for r in offspring_results]
+
         # Combine parents + offspring
         combined_pop = population + offspring
         combined_results = results + offspring_results
@@ -598,6 +666,15 @@ def run_evolution(
             f"[{survival_str}]{inject_str} | "
             f"age:{stats.best_age:2d} div:{unique_lineages:2d} | "
             f"mut:{improvements_from_mutation} mut*:{improvements_from_mutation_inj} inj:{improvements_from_injection}{src_str}"
+        )
+
+        # Save generation plot (for animation)
+        _save_generation_plot(
+            parent_fitnesses=parent_fitnesses,
+            offspring_fitnesses=offspring_fitnesses_for_plot,
+            gen=current_gen,
+            output_dir=config.output_dir,
+            best_fitness=best_ever_fitness,
         )
 
         # Save best MIDI and checkpoint periodically (only if fitness improved)
@@ -968,7 +1045,7 @@ if __name__ == "__main__":
             mu=20,
             lambda_=100,
             generations=args.generations,
-            random_seed=44,
+            random_seed=45,
             save_every_n_generations=5,
             encoding=args.encoding,
             evaluator=args.eval,

@@ -55,8 +55,8 @@ class BasicAnalyzer:
 
     def __init__(
         self,
-        modal_weight: float = 0.5,
-        activity_weight: float = 0.5,
+        modal_weight: float = 0.67,  # 2:1 ratio - modality is harder to learn
+        activity_weight: float = 0.33,
         min_note_density: float = 4,
     ):
         """
