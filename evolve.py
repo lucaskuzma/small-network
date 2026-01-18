@@ -120,8 +120,9 @@ def suppress_stdout():
 
 def _save_generation_plot(
     parent_fitnesses: list[float],
+    parent_from_random: list[bool],
     offspring_fitnesses: list[float],
-    parent_from_injection: list[bool],
+    random_fitnesses: list[float],
     gen: int,
     output_dir: str,
     best_fitness: float,
@@ -129,63 +130,89 @@ def _save_generation_plot(
     """Save PNG scatter plot of generation fitness distribution."""
     import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(12, 6))
 
     n_parents = len(parent_fitnesses)
     n_offspring = len(offspring_fitnesses)
+    n_randoms = len(random_fitnesses)
 
-    # Deterministic X positions: evenly spaced within each group
-    # Parents on left (0.1 to 0.4), offspring on right (0.6 to 0.9)
-    parent_x = np.linspace(0.1, 0.4, n_parents)
-    offspring_x = np.linspace(0.55, 0.95, n_offspring)
+    # Deterministic X positions: 3 groups
+    parent_x = np.linspace(0.05, 0.25, n_parents) if n_parents > 0 else []
+    offspring_x = np.linspace(0.35, 0.6, n_offspring) if n_offspring > 0 else []
+    random_x = np.linspace(0.7, 0.95, n_randoms) if n_randoms > 0 else []
 
-    # Parents - color by origin (green = original, orange = injection-descended)
-    parent_colors = ["#e67e22" if inj else "#2ecc71" for inj in parent_from_injection]
-    n_injected = sum(parent_from_injection)
-    n_original = n_parents - n_injected
+    # Parents - color by lineage (green = from mutation, purple = from random)
+    n_from_random = sum(parent_from_random)
+    n_from_mutation = n_parents - n_from_random
+    parent_colors = ["#9b59b6" if rnd else "#2ecc71" for rnd in parent_from_random]
 
+    if n_parents > 0:
+        ax.scatter(
+            parent_x,
+            parent_fitnesses,
+            c=parent_colors,
+            s=120,
+            alpha=0.9,
+            edgecolors="black",
+            linewidths=1.5,
+            zorder=4,
+        )
+
+    # Offspring (mutations) - blue
+    if n_offspring > 0:
+        ax.scatter(
+            offspring_x,
+            offspring_fitnesses,
+            c="#3498db",
+            s=40,
+            alpha=0.6,
+            label=f"Offspring ({n_offspring})",
+            zorder=2,
+        )
+
+    # Randoms - red
+    if n_randoms > 0:
+        ax.scatter(
+            random_x,
+            random_fitnesses,
+            c="#e74c3c",
+            s=40,
+            alpha=0.6,
+            label=f"Randoms ({n_randoms})",
+            zorder=2,
+        )
+
+    # Dummy scatters for legend (parents)
     ax.scatter(
-        parent_x,
-        parent_fitnesses,
-        c=parent_colors,
-        s=100,
-        alpha=0.8,
+        [],
+        [],
+        c="#2ecc71",
+        s=120,
+        label=f"Parents←Mut ({n_from_mutation})",
         edgecolors="black",
-        linewidths=1,
-        zorder=3,
-    )
-    # Dummy scatters for legend
-    ax.scatter(
-        [], [], c="#2ecc71", s=100, label=f"Original ({n_original})", edgecolors="black"
     )
     ax.scatter(
-        [], [], c="#e67e22", s=100, label=f"Injected ({n_injected})", edgecolors="black"
+        [],
+        [],
+        c="#9b59b6",
+        s=120,
+        label=f"Parents←Rnd ({n_from_random})",
+        edgecolors="black",
     )
 
-    # Offspring
-    ax.scatter(
-        offspring_x,
-        offspring_fitnesses,
-        c="#3498db",
-        s=30,
-        alpha=0.5,
-        label=f"Offspring (n={n_offspring})",
-        zorder=2,
-    )
-
-    # Formatting - fixed axes for consistent animation frames
+    # Formatting - fixed axes
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    ax.set_xticks([0.25, 0.75])
-    ax.set_xticklabels(["Parents (by rank)", "Offspring"])
+    ax.set_xticks([0.15, 0.475, 0.825])
+    ax.set_xticklabels(["Parents", "Offspring", "Randoms"])
     ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
     ax.set_ylabel("Fitness Score")
     ax.set_title(f"Generation {gen} | Best: {best_fitness:.4f}")
-    ax.legend(loc="upper right")
-    ax.axhline(y=best_fitness, color="#e74c3c", linestyle="--", alpha=0.7, label="Best")
+    ax.legend(loc="upper right", fontsize=9)
+    ax.axhline(y=best_fitness, color="gray", linestyle="--", alpha=0.5, linewidth=1)
     ax.grid(axis="y", alpha=0.3)
 
-    # Save with fixed size (no bbox_inches='tight' to keep consistent dimensions)
+    # Save
     plot_dir = os.path.join(output_dir, "generation_plots")
     os.makedirs(plot_dir, exist_ok=True)
     plot_path = os.path.join(plot_dir, f"gen_{gen:04d}.png")
@@ -203,8 +230,9 @@ class EvolutionConfig:
     """Configuration for evolution run."""
 
     # Evolution parameters
-    mu: int = 20  # Number of parents
-    lambda_: int = 100  # Number of offspring per generation
+    mu: int = 20  # Number of parents to keep
+    num_offspring: int = 50  # Number of mutated offspring per generation
+    num_randoms: int = 50  # Number of fresh randoms per generation
     generations: int = 50
 
     # Simulation parameters
@@ -508,23 +536,27 @@ def run_evolution(
 
     # Main evolution loop
     print(f"\nRunning evolution: generations {start_gen + 1} to {total_generations}")
-    print(f"  μ = {config.mu} parents, λ = {config.lambda_} offspring")
+    print(
+        f"  μ = {config.mu} parents, {config.num_offspring} offspring, {config.num_randoms} randoms"
+    )
     print(f"  Output directory: {config.output_dir}")
     print("-" * 100)
 
     # Track improvement sources
-    improvements_from_mutation = 0  # Pure mutations from original population
-    improvements_from_mutation_inj = 0  # Mutations from injection-descended individuals
-    improvements_from_injection = 0  # Direct injections
+    improvements_from_mutation = 0  # Improvements from mutation lineage
+    improvements_from_random = 0  # Improvements from random lineage
     last_saved_fitness = 0.0  # Track to avoid duplicate saves
+
+    # Get network params for generating randoms
+    ref_geno = population[0].genotype
 
     for current_gen in range(start_gen + 1, total_generations + 1):
         prev_best_id = population[0].id if population else None
         prev_best_fitness = results[0].fitness if results else 0.0
-        # Generate offspring via mutation (constant rates)
-        offspring = []
-        offspring_per_parent = config.lambda_ // config.mu
 
+        # Generate offspring via mutation
+        offspring = []
+        offspring_per_parent = config.num_offspring // config.mu
         for parent in population:
             for _ in range(offspring_per_parent):
                 child = parent.mutate_to_child(
@@ -537,24 +569,48 @@ def run_evolution(
                 )
                 offspring.append(child)
 
-        # Evaluate offspring
+        # Generate fresh randoms
+        randoms = []
+        for _ in range(config.num_randoms):
+            fresh = Individual(
+                genotype=NetworkGenotype.random(
+                    num_neurons=ref_geno.num_neurons,
+                    num_readouts=ref_geno.num_readouts,
+                    n_outputs_per_readout=ref_geno.n_outputs_per_readout,
+                ),
+                generation_born=current_gen,
+                from_injection=True,  # Mark as random lineage
+            )
+            randoms.append(fresh)
+
+        # Evaluate offspring and randoms separately
         offspring_results = []
+        random_results = []
+
+        # Evaluate offspring
         for ind in tqdm(
-            offspring, desc=f"Gen {current_gen:3d}", unit="ind", leave=False
+            offspring, desc=f"Gen {current_gen:3d} offspring", unit="ind", leave=False
         ):
             offspring_results.append(evaluate_genotype(ind.genotype, config))
+
+        # Evaluate randoms
+        for ind in tqdm(
+            randoms, desc=f"Gen {current_gen:3d} randoms", unit="ind", leave=False
+        ):
+            random_results.append(evaluate_genotype(ind.genotype, config))
 
         # Track previous generation's parent IDs for survival visualization
         prev_parent_ids = {ind.id for ind in population}
 
-        # Capture parent and offspring fitnesses for visualization BEFORE combining
+        # Capture fitnesses for visualization BEFORE combining
         parent_fitnesses = [r.fitness for r in results]
-        parent_from_injection = [ind.from_injection for ind in population]
+        parent_from_random = [ind.from_injection for ind in population]
         offspring_fitnesses_for_plot = [r.fitness for r in offspring_results]
+        random_fitnesses_for_plot = [r.fitness for r in random_results]
 
-        # Combine parents + offspring
-        combined_pop = population + offspring
-        combined_results = results + offspring_results
+        # Combine parents + offspring + randoms
+        combined_pop = population + offspring + randoms
+        combined_results = results + offspring_results + random_results
 
         # Select best μ individuals
         sorted_pairs = sorted(
@@ -612,79 +668,42 @@ def run_evolution(
         if best_improved:
             new_best = population[0]
             if new_best.id != prev_best_id:
-                # New individual became best - was it from mutation or will it be from injection?
-                # Check if it's an offspring (has parent_id) vs a fresh random (parent_id is None after injection)
-                if new_best.parent_id is not None:
-                    # Check if this mutation descended from an injection
-                    if new_best.from_injection:
-                        improvements_from_mutation_inj += 1
-                        improvement_source = "MUT*"  # Mutation of injection descendant
-                    else:
-                        improvements_from_mutation += 1
-                        improvement_source = "MUT"  # Pure mutation from original pop
+                # New individual became best - from mutation or random lineage?
+                if new_best.from_injection:
+                    improvements_from_random += 1
+                    improvement_source = "RND"
                 else:
-                    # This shouldn't happen here since injection happens AFTER selection
-                    # But track it anyway
-                    improvement_source = "???"
+                    improvements_from_mutation += 1
+                    improvement_source = "MUT"
 
         # Update best ever
         if fitnesses[0] > best_ever_fitness:
             best_ever_fitness = fitnesses[0]
             best_ever_individual = population[0]
 
-        # Diversity injection: if population collapsed (almost all parents survived),
-        # replace worst 25% with fresh random individuals
-        num_inject = 0
-        injected_ids = set()
-        if num_parents_survived >= config.mu - 2:  # Almost no turnover
-            num_inject = config.mu // 4  # Replace 25%
-            # Get network params from existing genotype
-            ref_geno = population[0].genotype
-            for i in range(num_inject):
-                fresh = Individual(
-                    genotype=NetworkGenotype.random(
-                        num_neurons=ref_geno.num_neurons,
-                        num_readouts=ref_geno.num_readouts,
-                        n_outputs_per_readout=ref_geno.n_outputs_per_readout,
-                    ),
-                    generation_born=current_gen,
-                    from_injection=True,  # Mark as injection-derived
-                )
-                population[-(i + 1)] = fresh
-                injected_ids.add(fresh.id)
-                # Re-evaluate the fresh individual
-                fresh_result = evaluate_genotype(fresh.genotype, config)
-                results[-(i + 1)] = fresh_result
+        # Count how many parents are from random vs mutation lineage
+        n_parents_from_random = sum(1 for ind in population if ind.from_injection)
+        n_parents_from_mutation = config.mu - n_parents_from_random
 
-                # Check if this injection became the new best
-                if fresh_result.fitness > best_ever_fitness:
-                    best_ever_fitness = fresh_result.fitness
-                    best_ever_individual = fresh
-                    improvements_from_injection += 1
-                    improvement_source = "INJ"
-                    # Update stats for display
-                    best_ind = fresh
-                    best_result = fresh_result
-
-        # Progress output with survival visualization
-        # ● = parent survived, ○ = replaced by offspring, + = injected fresh
-        inject_str = f" +{num_inject}" if num_inject > 0 else ""
+        # Progress output
         src_str = f" [{improvement_source}]" if improvement_source else ""
         tqdm.write(
             f"Gen {current_gen:3d} | "
             f"Best: {stats.best_fitness:.4f} | "
             f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} | "
             f"notes:{best_result.note_count:3d} | "
-            f"[{survival_str}]{inject_str} | "
-            f"age:{stats.best_age:2d} div:{unique_lineages:2d} | "
-            f"mut:{improvements_from_mutation} mut*:{improvements_from_mutation_inj} inj:{improvements_from_injection}{src_str}"
+            f"[{survival_str}] | "
+            f"age:{stats.best_age:2d} | "
+            f"parents: mut={n_parents_from_mutation} rnd={n_parents_from_random} | "
+            f"wins: mut={improvements_from_mutation} rnd={improvements_from_random}{src_str}"
         )
 
         # Save generation plot (for animation)
         _save_generation_plot(
             parent_fitnesses=parent_fitnesses,
+            parent_from_random=parent_from_random,
             offspring_fitnesses=offspring_fitnesses_for_plot,
-            parent_from_injection=parent_from_injection,
+            random_fitnesses=random_fitnesses_for_plot,
             gen=current_gen,
             output_dir=config.output_dir,
             best_fitness=best_ever_fitness,
@@ -1056,7 +1075,8 @@ if __name__ == "__main__":
         # Fresh run
         config = EvolutionConfig(
             mu=20,
-            lambda_=100,
+            num_offspring=50,
+            num_randoms=50,
             generations=args.generations,
             random_seed=45,
             save_every_n_generations=5,
