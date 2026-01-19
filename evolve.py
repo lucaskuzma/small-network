@@ -192,26 +192,96 @@ def _save_generation_plot(
         offspring_mod_med = np.median(offspring_modality) if offspring_modality else 0
         offspring_act_med = np.median(offspring_activity) if offspring_activity else 0
         # Fitness - solid blue
-        ax.hlines(offspring_fit_med, 0.35, 0.6, colors="#3498db", linestyles="-", linewidth=2, alpha=0.9, zorder=3)
+        ax.hlines(
+            offspring_fit_med,
+            0.35,
+            0.6,
+            colors="#3498db",
+            linestyles="-",
+            linewidth=2,
+            alpha=0.9,
+            zorder=3,
+        )
         # Modality - dashed purple
-        ax.hlines(offspring_mod_med, 0.35, 0.6, colors="#9b59b6", linestyles="--", linewidth=1.5, alpha=0.8, zorder=3)
+        ax.hlines(
+            offspring_mod_med,
+            0.35,
+            0.6,
+            colors="#9b59b6",
+            linestyles="--",
+            linewidth=1.5,
+            alpha=0.8,
+            zorder=3,
+        )
         # Activity - dotted green
-        ax.hlines(offspring_act_med, 0.35, 0.6, colors="#27ae60", linestyles=":", linewidth=1.5, alpha=0.8, zorder=3)
+        ax.hlines(
+            offspring_act_med,
+            0.35,
+            0.6,
+            colors="#27ae60",
+            linestyles=":",
+            linewidth=1.5,
+            alpha=0.8,
+            zorder=3,
+        )
 
     if n_randoms > 0:
         random_fit_med = np.median(random_fitnesses)
         random_mod_med = np.median(random_modality) if random_modality else 0
         random_act_med = np.median(random_activity) if random_activity else 0
         # Fitness - solid red
-        ax.hlines(random_fit_med, 0.7, 0.95, colors="#e74c3c", linestyles="-", linewidth=2, alpha=0.9, zorder=3)
+        ax.hlines(
+            random_fit_med,
+            0.7,
+            0.95,
+            colors="#e74c3c",
+            linestyles="-",
+            linewidth=2,
+            alpha=0.9,
+            zorder=3,
+        )
         # Modality - dashed purple
-        ax.hlines(random_mod_med, 0.7, 0.95, colors="#9b59b6", linestyles="--", linewidth=1.5, alpha=0.8, zorder=3)
+        ax.hlines(
+            random_mod_med,
+            0.7,
+            0.95,
+            colors="#9b59b6",
+            linestyles="--",
+            linewidth=1.5,
+            alpha=0.8,
+            zorder=3,
+        )
         # Activity - dotted green
-        ax.hlines(random_act_med, 0.7, 0.95, colors="#27ae60", linestyles=":", linewidth=1.5, alpha=0.8, zorder=3)
+        ax.hlines(
+            random_act_med,
+            0.7,
+            0.95,
+            colors="#27ae60",
+            linestyles=":",
+            linewidth=1.5,
+            alpha=0.8,
+            zorder=3,
+        )
 
     # Legend entries for median lines
-    ax.hlines([], [], [], colors="#9b59b6", linestyles="--", linewidth=1.5, label="Modality median")
-    ax.hlines([], [], [], colors="#27ae60", linestyles=":", linewidth=1.5, label="Activity median")
+    ax.hlines(
+        [],
+        [],
+        [],
+        colors="#9b59b6",
+        linestyles="--",
+        linewidth=1.5,
+        label="Modality median",
+    )
+    ax.hlines(
+        [],
+        [],
+        [],
+        colors="#27ae60",
+        linestyles=":",
+        linewidth=1.5,
+        label="Activity median",
+    )
 
     # Dummy scatters for legend (parents)
     ax.scatter(
