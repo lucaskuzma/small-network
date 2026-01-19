@@ -393,6 +393,135 @@ def save_readout_outputs_as_midi(
     return filename
 
 
+def save_argmax_outputs_as_midi(
+    output_history: np.ndarray,
+    filename: str = "argmax_output.mid",
+    tempo: int = 120,
+    min_threshold: float = 0.3,
+    base_notes: list = None,
+):
+    """
+    Save network outputs as MIDI using argmax selection per voice.
+    
+    Only one pitch per voice per timestep: the one with highest output value.
+    Note only triggers if that highest value exceeds min_threshold.
+    
+    Args:
+        output_history: numpy array of shape (T, num_voices, n_pitches)
+        filename: output MIDI filename
+        tempo: beats per minute
+        min_threshold: minimum output value for argmax winner to trigger note
+        base_notes: base MIDI note per voice (default: [48, 60, 72, 84])
+    """
+    from mido import Message, MidiFile, MidiTrack, MetaMessage
+
+    # Parse output_history shape
+    if len(output_history.shape) != 3:
+        raise ValueError(
+            f"output_history must be 3D (steps, voices, pitches), got shape {output_history.shape}"
+        )
+
+    num_steps, num_voices, n_pitches = output_history.shape
+
+    # Default base notes
+    if base_notes is None:
+        base_notes = [48, 60, 72, 84]  # C3, C4, C5, C6
+
+    # Ensure enough base notes
+    while len(base_notes) < num_voices:
+        base_notes.append(base_notes[-1] + 12)
+
+    # Create MIDI file
+    mid = MidiFile()
+    ticks_per_beat = 480
+    mid.ticks_per_beat = ticks_per_beat
+    ticks_per_16th = ticks_per_beat // 4
+
+    for voice_idx in range(num_voices):
+        track = MidiTrack()
+        mid.tracks.append(track)
+
+        # Metadata
+        track.append(MetaMessage("track_name", name=f"Voice {voice_idx + 1}", time=0))
+        if voice_idx == 0:
+            microseconds_per_beat = int(60_000_000 / tempo)
+            track.append(MetaMessage("set_tempo", tempo=microseconds_per_beat, time=0))
+
+        base_note = base_notes[voice_idx]
+        current_note = None  # Currently playing note
+        current_absolute_time = 0
+
+        for step_idx in range(num_steps):
+            step_time = step_idx * ticks_per_16th
+            outputs = output_history[step_idx, voice_idx, :]
+
+            # Argmax: find highest output
+            best_idx = np.argmax(outputs)
+            best_val = outputs[best_idx]
+
+            # Determine target note (or None if below threshold)
+            target_note = None
+            if best_val > min_threshold:
+                target_note = base_note + best_idx
+
+            # Handle note transitions
+            if target_note != current_note:
+                # End current note if any
+                if current_note is not None:
+                    delta = step_time - current_absolute_time
+                    track.append(
+                        Message(
+                            "note_off",
+                            note=current_note,
+                            velocity=0,
+                            time=delta,
+                            channel=voice_idx % 16,
+                        )
+                    )
+                    current_absolute_time = step_time
+
+                # Start new note if any
+                if target_note is not None:
+                    delta = step_time - current_absolute_time
+                    velocity = int(np.clip(best_val * 127, 1, 127))
+                    track.append(
+                        Message(
+                            "note_on",
+                            note=target_note,
+                            velocity=velocity,
+                            time=delta,
+                            channel=voice_idx % 16,
+                        )
+                    )
+                    current_absolute_time = step_time
+
+                current_note = target_note
+
+        # End any remaining note
+        if current_note is not None:
+            final_time = num_steps * ticks_per_16th
+            delta = final_time - current_absolute_time
+            track.append(
+                Message(
+                    "note_off",
+                    note=current_note,
+                    velocity=0,
+                    time=delta,
+                    channel=voice_idx % 16,
+                )
+            )
+            current_absolute_time = final_time
+
+        track.append(MetaMessage("end_of_track", time=0))
+
+    mid.save(filename)
+    print(f"MIDI file saved (argmax): {filename}")
+    print(f"  Tempo: {tempo} BPM, Voices: {num_voices}, Pitches: {n_pitches}")
+    print(f"  Min threshold: {min_threshold}")
+
+    return filename
+
+
 # =======================================================================
 # Motion-based MIDI export
 # =======================================================================

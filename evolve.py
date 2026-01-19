@@ -121,9 +121,14 @@ def _save_generation_plot(
     parent_from_random: list[bool],
     offspring_fitnesses: list[float],
     random_fitnesses: list[float],
+    offspring_modality: list[float],
+    offspring_activity: list[float],
+    random_modality: list[float],
+    random_activity: list[float],
     gen: int,
     output_dir: str,
     best_fitness: float,
+    encoding: str = "pitch",
 ):
     """Save PNG scatter plot of generation fitness distribution."""
     import matplotlib.pyplot as plt
@@ -180,11 +185,13 @@ def _save_generation_plot(
             zorder=2,
         )
 
-    # Median lines for offspring and randoms
+    # Median lines for offspring and randoms (fitness, modality, activity)
     if n_offspring > 0:
-        offspring_median = np.median(offspring_fitnesses)
+        offspring_fit_med = np.median(offspring_fitnesses)
+        offspring_mod_med = np.median(offspring_modality) if offspring_modality else 0
+        offspring_act_med = np.median(offspring_activity) if offspring_activity else 0
         ax.hlines(
-            offspring_median,
+            offspring_fit_med,
             0.35,
             0.6,
             colors="#3498db",
@@ -195,18 +202,20 @@ def _save_generation_plot(
         )
         ax.text(
             0.61,
-            offspring_median,
-            f"{offspring_median:.2f}",
+            offspring_fit_med,
+            f"fit:{offspring_fit_med:.2f} mod:{offspring_mod_med:.2f} act:{offspring_act_med:.2f}",
             va="center",
             ha="left",
-            fontsize=9,
+            fontsize=8,
             color="#3498db",
         )
 
     if n_randoms > 0:
-        random_median = np.median(random_fitnesses)
+        random_fit_med = np.median(random_fitnesses)
+        random_mod_med = np.median(random_modality) if random_modality else 0
+        random_act_med = np.median(random_activity) if random_activity else 0
         ax.hlines(
-            random_median,
+            random_fit_med,
             0.7,
             0.95,
             colors="#e74c3c",
@@ -217,11 +226,11 @@ def _save_generation_plot(
         )
         ax.text(
             0.96,
-            random_median,
-            f"{random_median:.2f}",
+            random_fit_med,
+            f"fit:{random_fit_med:.2f} mod:{random_mod_med:.2f} act:{random_act_med:.2f}",
             va="center",
             ha="left",
-            fontsize=9,
+            fontsize=8,
             color="#e74c3c",
         )
 
@@ -250,7 +259,7 @@ def _save_generation_plot(
     ax.set_xticklabels(["Parents", "Offspring", "Randoms"])
     ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
     ax.set_ylabel("Fitness Score")
-    ax.set_title(f"Generation {gen} | Best: {best_fitness:.4f}")
+    ax.set_title(f"Generation {gen} | Best: {best_fitness:.4f} | Encoding: {encoding}")
     ax.legend(loc="upper right", fontsize=9)
     ax.axhline(y=best_fitness, color="gray", linestyle="--", alpha=0.5, linewidth=1)
     ax.grid(axis="y", alpha=0.3)
@@ -645,12 +654,16 @@ def run_evolution(
         # Track previous generation's parent IDs for survival visualization
         prev_parent_ids = {ind.id for ind in population}
 
-        # Capture fitnesses for visualization BEFORE combining
+        # Capture metrics for visualization BEFORE combining
         parent_fitnesses = [r.fitness for r in results]
         # parent_id is None means it was a fresh random, not None means it was a mutation
         parent_from_random = [ind.parent_id is None for ind in population]
         offspring_fitnesses_for_plot = [r.fitness for r in offspring_results]
+        offspring_modality_for_plot = [r.modal_consistency for r in offspring_results]
+        offspring_activity_for_plot = [r.activity for r in offspring_results]
         random_fitnesses_for_plot = [r.fitness for r in random_results]
+        random_modality_for_plot = [r.modal_consistency for r in random_results]
+        random_activity_for_plot = [r.activity for r in random_results]
 
         # Combine parents + offspring + randoms
         combined_pop = population + offspring + randoms
@@ -749,9 +762,14 @@ def run_evolution(
             parent_from_random=parent_from_random,
             offspring_fitnesses=offspring_fitnesses_for_plot,
             random_fitnesses=random_fitnesses_for_plot,
+            offspring_modality=offspring_modality_for_plot,
+            offspring_activity=offspring_activity_for_plot,
+            random_modality=random_modality_for_plot,
+            random_activity=random_activity_for_plot,
             gen=current_gen,
             output_dir=config.output_dir,
             best_fitness=best_ever_fitness,
+            encoding=config.encoding,
         )
 
         # Save best MIDI and checkpoint periodically (only if fitness improved)
@@ -945,29 +963,27 @@ def _create_mapper_for_encoding(encoding: str) -> Callable[..., str]:
 
 def create_pitch_class_mapper(
     base_notes: list[int] = [48, 60, 72, 84],
-    percentile: int = 95,
+    min_threshold: float = 0.3,
 ) -> Callable[..., str]:
     """
     Create a mapper for pitch-class encoding (original 12-output scheme).
 
     Each of 12 outputs per voice maps to a chromatic pitch class.
-    Notes triggered when output exceeds percentile-based threshold.
+    Uses argmax: only the highest output per voice per timestep triggers a note,
+    and only if it exceeds min_threshold.
+
+    Args:
+        base_notes: Base MIDI note per voice
+        min_threshold: Minimum output value for argmax winner to trigger note
     """
-    from utils_sonic import save_readout_outputs_as_midi
+    from utils_sonic import save_argmax_outputs_as_midi
 
     def mapper(output_history: np.ndarray, filename: str, tempo: int) -> str:
-        num_readouts = output_history.shape[1]
-        # Compute voice thresholds (percentile-based, capped at 0.99)
-        voice_thresholds = np.zeros(num_readouts)
-        for r in range(num_readouts):
-            voice_data = output_history[:, r, :]
-            voice_thresholds[r] = min(np.percentile(voice_data, percentile), 0.99)
-
-        save_readout_outputs_as_midi(
+        save_argmax_outputs_as_midi(
             output_history,
             filename=filename,
             tempo=tempo,
-            threshold=voice_thresholds,
+            min_threshold=min_threshold,
             base_notes=base_notes,
         )
         return filename
@@ -977,7 +993,7 @@ def create_pitch_class_mapper(
 
 def create_motion_mapper(
     start_pitches: list[int] = [48, 60, 72, 84],
-    velocity_percentile: int = 50,
+    velocity_threshold: float = 0.3,
     velocity_range: tuple[int, int] = (70, 100),
 ) -> Callable[..., str]:
     """
@@ -989,7 +1005,7 @@ def create_motion_mapper(
 
     Args:
         start_pitches: Starting MIDI note per voice
-        velocity_percentile: Threshold as % of peak velocity (e.g., 50 = half of peak)
+        velocity_threshold: Fixed threshold for |v1-v2| to trigger notes (0-1)
         velocity_range: (min, max) MIDI velocity range for dynamics
 
     Voices start at unison (C) in their respective octaves.
@@ -999,24 +1015,11 @@ def create_motion_mapper(
     from utils_sonic import save_motion_outputs_as_midi
 
     def mapper(output_history: np.ndarray, filename: str, tempo: int) -> str:
-        # Compute velocity values (v1 * v2) per voice
-        # Outputs 6 and 7 are v1 and v2
-        num_voices = output_history.shape[1]
-
-        # Compute adaptive threshold PER VOICE using peak-relative method
-        # threshold = X% of peak velocity (not percentile of occurrences)
-        # This lets the network control note density, not the threshold
-        velocity_thresholds = np.zeros(num_voices)
-        for v in range(num_voices):
-            vel_values = np.abs(output_history[:, v, 6] - output_history[:, v, 7])
-            peak_vel = np.max(vel_values) if len(vel_values) > 0 else 1.0
-            velocity_thresholds[v] = peak_vel * (velocity_percentile / 100.0)
-
         save_motion_outputs_as_midi(
             output_history,
             filename=filename,
             tempo=tempo,
-            velocity_threshold=velocity_thresholds,  # now per-voice array
+            velocity_threshold=velocity_threshold,  # Fixed threshold for all voices
             start_pitches=start_pitches,
             velocity_range=velocity_range,
         )
