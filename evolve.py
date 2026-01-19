@@ -53,13 +53,12 @@ def compute_genotype_hash(genotype: NetworkGenotype) -> str:
 
 @dataclass
 class Individual:
-    """Wrapper for genotype with lineage tracking."""
+    """Wrapper for genotype with tracking."""
 
     genotype: NetworkGenotype
     id: str = field(default_factory=lambda: "")
-    parent_id: Optional[str] = None
+    parent_id: Optional[str] = None  # None = fresh random, set = mutation of parent
     generation_born: int = 0
-    from_injection: bool = False  # True if this individual or ancestor was injected
 
     def __post_init__(self):
         if not self.id:
@@ -68,13 +67,12 @@ class Individual:
     def mutate_to_child(
         self, current_generation: int, **mutation_kwargs
     ) -> "Individual":
-        """Create a mutated child with lineage tracking."""
+        """Create a mutated child with tracking."""
         child_genotype = self.genotype.mutate(**mutation_kwargs)
         return Individual(
             genotype=child_genotype,
             parent_id=self.id,
             generation_born=current_generation,
-            from_injection=self.from_injection,  # Inherit injection ancestry
         )
 
 
@@ -615,7 +613,7 @@ def run_evolution(
             offspring.append(child)
             parent_idx += 1
 
-        # Generate fresh randoms
+        # Generate fresh randoms (parent_id=None by default marks them as random)
         randoms = []
         for _ in range(config.num_randoms):
             fresh = Individual(
@@ -625,7 +623,6 @@ def run_evolution(
                     n_outputs_per_readout=ref_geno.n_outputs_per_readout,
                 ),
                 generation_born=current_gen,
-                from_injection=True,  # Mark as random lineage
             )
             randoms.append(fresh)
 
@@ -650,7 +647,8 @@ def run_evolution(
 
         # Capture fitnesses for visualization BEFORE combining
         parent_fitnesses = [r.fitness for r in results]
-        parent_from_random = [ind.from_injection for ind in population]
+        # parent_id is None means it was a fresh random, not None means it was a mutation
+        parent_from_random = [ind.parent_id is None for ind in population]
         offspring_fitnesses_for_plot = [r.fitness for r in offspring_results]
         random_fitnesses_for_plot = [r.fitness for r in random_results]
 
@@ -728,8 +726,8 @@ def run_evolution(
             best_ever_fitness = fitnesses[0]
             best_ever_individual = population[0]
 
-        # Count how many parents are from random vs mutation lineage
-        n_parents_from_random = sum(1 for ind in population if ind.from_injection)
+        # Count how many parents were created as fresh randoms vs mutations
+        n_parents_from_random = sum(1 for ind in population if ind.parent_id is None)
         n_parents_from_mutation = config.mu - n_parents_from_random
 
         # Progress output
