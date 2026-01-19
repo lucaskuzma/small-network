@@ -182,6 +182,51 @@ def _save_generation_plot(
             zorder=2,
         )
 
+    # Median lines for offspring and randoms
+    if n_offspring > 0:
+        offspring_median = np.median(offspring_fitnesses)
+        ax.hlines(
+            offspring_median,
+            0.35,
+            0.6,
+            colors="#3498db",
+            linestyles="--",
+            linewidth=2,
+            alpha=0.8,
+            zorder=3,
+        )
+        ax.text(
+            0.61,
+            offspring_median,
+            f"{offspring_median:.2f}",
+            va="center",
+            ha="left",
+            fontsize=9,
+            color="#3498db",
+        )
+
+    if n_randoms > 0:
+        random_median = np.median(random_fitnesses)
+        ax.hlines(
+            random_median,
+            0.7,
+            0.95,
+            colors="#e74c3c",
+            linestyles="--",
+            linewidth=2,
+            alpha=0.8,
+            zorder=3,
+        )
+        ax.text(
+            0.96,
+            random_median,
+            f"{random_median:.2f}",
+            va="center",
+            ha="left",
+            fontsize=9,
+            color="#e74c3c",
+        )
+
     # Dummy scatters for legend (parents)
     ax.scatter(
         [],
@@ -241,10 +286,10 @@ class EvolutionConfig:
 
     # Mutation parameters
     weight_mutation_rate: float = 0.1
-    weight_mutation_scale: float = 0.05
+    weight_mutation_scale: float = 0.001
     threshold_mutation_rate: float = 0.1
-    threshold_mutation_scale: float = 0.05
-    refraction_mutation_rate: float = 0.05
+    threshold_mutation_scale: float = 0.001
+    refraction_mutation_rate: float = 0
 
     # Output
     output_dir: str = "evolve_midi"
