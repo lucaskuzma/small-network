@@ -543,6 +543,10 @@ class GenerationStats:
     num_culled: int = 0  # networks with fitness=0 (fizzled, exploded, or dead)
     # Population diversity
     unique_lineages: int = 0  # unique parent IDs among surviving parents
+    # Best individual's evaluation metrics
+    best_modal_consistency: float = 0.0
+    best_activity: float = 0.0
+    best_note_count: int = 0
 
 
 def run_evolution(
@@ -765,6 +769,9 @@ def run_evolution(
             best_age=current_gen - best_ind.generation_born,
             num_culled=num_culled,
             unique_lineages=unique_lineages,
+            best_modal_consistency=best_result.modal_consistency,
+            best_activity=best_result.activity,
+            best_note_count=best_result.note_count,
         )
         history.append(stats)
 
@@ -937,26 +944,36 @@ def plot_evolution_history(
         bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
     )
 
-    # Bottom left: Diversity and culling over generations
+    # Bottom left: Modality, Activity, and Fitness over generations
     ax = axes[1, 0]
-    unique_lineages = [s.unique_lineages for s in history]
-    num_culled = [s.num_culled for s in history]
+    modal_consistency = [s.best_modal_consistency for s in history]
+    activity = [s.best_activity for s in history]
 
-    ax.plot(generations, unique_lineages, "g-", linewidth=2, label="Unique lineages")
-    ax.set_xlabel("Generation")
-    ax.set_ylabel("Diversity (unique parent lineages)")
-    ax.set_title("Population Diversity & Culling")
-    ax.legend(loc="upper left")
-    ax.grid(True, alpha=0.3)
-
-    # Add culled count on secondary axis
-    ax2 = ax.twinx()
-    ax2.fill_between(
-        generations, 0, num_culled, alpha=0.3, color="red", label="Culled (degenerate)"
+    ax.plot(generations, best_fitness, "b-", linewidth=2, label="Fitness", alpha=0.9)
+    ax.plot(
+        generations,
+        modal_consistency,
+        "--",
+        color="#9b59b6",
+        linewidth=2,
+        label="Modality",
+        alpha=0.8,
     )
-    ax2.set_ylabel("Culled networks", color="red")
-    ax2.tick_params(axis="y", labelcolor="red")
-    ax2.legend(loc="upper right")
+    ax.plot(
+        generations,
+        activity,
+        ":",
+        color="#27ae60",
+        linewidth=2,
+        label="Activity",
+        alpha=0.8,
+    )
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("Score (0-1)")
+    ax.set_title("Fitness Components Over Time")
+    ax.set_ylim(0, 1)
+    ax.legend(loc="best")
+    ax.grid(True, alpha=0.3)
 
     # Bottom right: Network properties correlation heatmap
     ax = axes[1, 1]
