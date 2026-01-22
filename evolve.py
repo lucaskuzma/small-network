@@ -446,7 +446,6 @@ class EvalResult:
     """Result from evaluating a single genotype."""
 
     fitness: float
-    spectral_radius: float
     total_firing_events: int
     mean_activation: float
     activity_trend: float  # ratio of 2nd/1st half firing (used for culling)
@@ -476,9 +475,6 @@ def evaluate_genotype(
     """
     # Create network from genotype
     net = genotype.to_network()
-
-    # Get network properties
-    spectral_radius = net.get_spectral_radius()
 
     # Run simulation
     num_readouts = genotype.num_readouts
@@ -525,7 +521,6 @@ def evaluate_genotype(
     if is_degenerate:
         return EvalResult(
             fitness=0.0,
-            spectral_radius=spectral_radius,
             total_firing_events=total_firing_events,
             mean_activation=mean_activation,
             activity_trend=activity_trend,
@@ -578,7 +573,6 @@ def evaluate_genotype(
 
     return EvalResult(
         fitness=fitness,
-        spectral_radius=spectral_radius,
         total_firing_events=total_firing_events,
         mean_activation=mean_activation,
         activity_trend=activity_trend,
@@ -606,8 +600,6 @@ class GenerationStats:
     best_fitness: float
     mean_fitness: float
     std_fitness: float
-    best_spectral_radius: float
-    mean_spectral_radius: float
     best_firing_events: int
     mean_firing_events: float
     num_degenerate: int  # Networks with no activity
@@ -1119,7 +1111,6 @@ def run_evolution(
         num_parents_survived = sum(1 for ind in population if ind.id in prev_parent_ids)
 
         # Compute statistics
-        all_spectral = [r.spectral_radius for r in combined_results]
         all_firing = [r.total_firing_events for r in combined_results]
         num_degenerate = sum(1 for r in combined_results if r.total_firing_events == 0)
         # Culled = degenerate networks (fitness=0 due to dead, fizzling, or exploding)
@@ -1149,8 +1140,6 @@ def run_evolution(
             best_fitness=fitnesses[0],
             mean_fitness=np.mean(fitnesses),
             std_fitness=np.std(fitnesses),
-            best_spectral_radius=best_result.spectral_radius,
-            mean_spectral_radius=np.mean(all_spectral),
             best_firing_events=best_result.total_firing_events,
             mean_firing_events=np.mean(all_firing),
             num_degenerate=num_degenerate,
@@ -1296,96 +1285,24 @@ def run_evolution(
 # =============================================================================
 
 
-def plot_lineage_history(
-    history: list[GenerationStats], save_path: Optional[str] = None
-):
-    """Plot lineage survival over generations as a stacked area chart."""
-    if not history or not history[0].lineage_counts:
-        print("No lineage data to plot.")
-        return
-
-    generations = [s.generation for s in history]
-
-    # Collect all root IDs that ever appear
-    all_roots = set()
-    for s in history:
-        all_roots.update(s.lineage_counts.keys())
-    all_roots = sorted(all_roots)  # Consistent ordering
-
-    # Build data matrix: (num_generations, num_roots)
-    data = np.zeros((len(history), len(all_roots)))
-    for i, s in enumerate(history):
-        for j, root in enumerate(all_roots):
-            data[i, j] = s.lineage_counts.get(root, 0)
-
-    # Create figure
-    fig, ax = plt.subplots(figsize=(14, 6))
-
-    # Generate colors for each lineage
-    cmap = plt.cm.get_cmap("tab20", len(all_roots))
-    colors = [cmap(i) for i in range(len(all_roots))]
-
-    # Stacked area chart
-    ax.stackplot(
-        generations,
-        data.T,
-        labels=[f"L{i}" for i in range(len(all_roots))],
-        colors=colors,
-        alpha=0.8,
-    )
-
-    ax.set_xlabel("Generation")
-    ax.set_ylabel("Number of Parents from Lineage")
-    ax.set_title("Lineage Survival Over Generations")
-    ax.set_xlim(generations[0], generations[-1])
-    ax.set_ylim(0, data.sum(axis=1).max())
-
-    # Legend (only show lineages that survived past gen 1)
-    surviving_at_end = [
-        root for root in all_roots if history[-1].lineage_counts.get(root, 0) > 0
-    ]
-    if len(all_roots) <= 10:
-        ax.legend(loc="upper right", fontsize=8)
-    else:
-        # Too many to show all - just note how many survive
-        ax.text(
-            0.98,
-            0.98,
-            f"{len(surviving_at_end)}/{len(all_roots)} lineages survive",
-            transform=ax.transAxes,
-            ha="right",
-            va="top",
-            fontsize=10,
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
-        )
-
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
-        print(f"Lineage plot saved to: {save_path}")
-        plt.close(fig)
-    else:
-        plt.show()
-
-
 def plot_evolution_history(
     history: list[GenerationStats], save_path: Optional[str] = None
 ):
-    """Plot evolution progress and network property correlations."""
+    """Plot evolution progress: fitness charts on top, lineage chart on bottom."""
 
     generations = [s.generation for s in history]
     best_fitness = [s.best_fitness for s in history]
     mean_fitness = [s.mean_fitness for s in history]
     std_fitness = [s.std_fitness for s in history]
-    spectral_radius = [s.best_spectral_radius for s in history]
-    firing_events = [s.best_firing_events for s in history]
-    num_degenerate = [s.num_degenerate for s in history]
+    modal_consistency = [s.best_modal_consistency for s in history]
+    activity = [s.best_activity for s in history]
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    # Create figure with 2 rows: top row has 2 columns, bottom row spans full width
+    fig = plt.figure(figsize=(14, 10))
+    gs = fig.add_gridspec(2, 2, height_ratios=[1, 1])
 
     # Top left: Fitness over generations
-    ax = axes[0, 0]
+    ax = fig.add_subplot(gs[0, 0])
     ax.plot(generations, best_fitness, "b-", linewidth=2, label="Best")
     ax.fill_between(
         generations,
@@ -1402,34 +1319,8 @@ def plot_evolution_history(
     ax.legend()
     ax.grid(True, alpha=0.3)
 
-    # Top right: Spectral radius vs fitness
-    ax = axes[0, 1]
-    scatter = ax.scatter(
-        spectral_radius, best_fitness, c=generations, cmap="viridis", alpha=0.7
-    )
-    ax.set_xlabel("Spectral Radius")
-    ax.set_ylabel("Best Fitness")
-    ax.set_title("Spectral Radius vs Fitness")
-    plt.colorbar(scatter, ax=ax, label="Generation")
-    ax.grid(True, alpha=0.3)
-
-    # Compute correlation
-    corr = np.corrcoef(spectral_radius, best_fitness)[0, 1]
-    ax.text(
-        0.05,
-        0.95,
-        f"r = {corr:.3f}",
-        transform=ax.transAxes,
-        fontsize=12,
-        verticalalignment="top",
-        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
-    )
-
-    # Bottom left: Modality, Activity, and Fitness over generations
-    ax = axes[1, 0]
-    modal_consistency = [s.best_modal_consistency for s in history]
-    activity = [s.best_activity for s in history]
-
+    # Top right: Modality, Activity, and Fitness over generations
+    ax = fig.add_subplot(gs[0, 1])
     ax.plot(generations, best_fitness, "b-", linewidth=2, label="Fitness", alpha=0.9)
     ax.plot(
         generations,
@@ -1456,33 +1347,57 @@ def plot_evolution_history(
     ax.legend(loc="best")
     ax.grid(True, alpha=0.3)
 
-    # Bottom right: Network properties correlation heatmap
-    ax = axes[1, 1]
-    data = np.array([best_fitness, spectral_radius, firing_events]).T
-    labels = ["Fitness", "Spectral ρ", "Firing"]
-    corr_matrix = np.corrcoef(data.T)
+    # Bottom: Lineage survival (spans full width)
+    ax = fig.add_subplot(gs[1, :])
 
-    im = ax.imshow(corr_matrix, cmap="RdBu_r", vmin=-1, vmax=1)
-    ax.set_xticks(range(len(labels)))
-    ax.set_yticks(range(len(labels)))
-    ax.set_xticklabels(labels)
-    ax.set_yticklabels(labels)
-    ax.set_title("Property Correlations")
+    if history and history[0].lineage_counts:
+        # Collect all root IDs that ever appear
+        all_roots = set()
+        for s in history:
+            all_roots.update(s.lineage_counts.keys())
+        all_roots = sorted(all_roots)
 
-    # Add correlation values as text
-    for i in range(len(labels)):
-        for j in range(len(labels)):
-            text = ax.text(
-                j,
-                i,
-                f"{corr_matrix[i, j]:.2f}",
-                ha="center",
-                va="center",
-                color="black",
-                fontsize=12,
-            )
+        # Build data matrix: (num_generations, num_roots)
+        lineage_data = np.zeros((len(history), len(all_roots)))
+        for i, s in enumerate(history):
+            for j, root in enumerate(all_roots):
+                lineage_data[i, j] = s.lineage_counts.get(root, 0)
 
-    plt.colorbar(im, ax=ax, label="Correlation")
+        # Generate colors for each lineage
+        cmap = plt.cm.get_cmap("tab20", len(all_roots))
+        colors = [cmap(i) for i in range(len(all_roots))]
+
+        # Stacked area chart
+        ax.stackplot(
+            generations,
+            lineage_data.T,
+            colors=colors,
+            alpha=0.8,
+        )
+
+        ax.set_xlabel("Generation")
+        ax.set_ylabel("Parents per Lineage")
+        ax.set_title("Lineage Survival Over Generations")
+        ax.set_xlim(generations[0], generations[-1])
+        ax.set_ylim(0, lineage_data.sum(axis=1).max())
+
+        # Note how many lineages survive
+        surviving_at_end = [
+            root for root in all_roots if history[-1].lineage_counts.get(root, 0) > 0
+        ]
+        ax.text(
+            0.98,
+            0.98,
+            f"{len(surviving_at_end)}/{len(all_roots)} lineages survive",
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+            fontsize=10,
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        )
+    else:
+        ax.text(0.5, 0.5, "No lineage data", ha="center", va="center")
+        ax.set_title("Lineage Survival")
 
     plt.tight_layout()
 
@@ -1702,10 +1617,6 @@ if __name__ == "__main__":
     # Plot results
     plot_path = os.path.join(config.output_dir, "evolution_history.png")
     plot_evolution_history(history, save_path=plot_path)
-
-    # Plot lineage survival
-    lineage_path = os.path.join(config.output_dir, "lineage_history.png")
-    plot_lineage_history(history, save_path=lineage_path)
 
     # Save best genotype
     genotype_path = os.path.join(config.output_dir, "best_genotype.pkl")
