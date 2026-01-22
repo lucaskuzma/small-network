@@ -29,6 +29,9 @@ class NeuralNetworkState:
     use_refraction_decay: bool = False
     use_tanh_activation: bool = False
 
+    # Weight threshold: weights with |w| < threshold are treated as 0
+    weight_threshold: float = 0.0  # 0 = disabled
+
     def __post_init__(self):
         self.num_outputs = self.num_readouts * self.n_outputs_per_readout
 
@@ -118,12 +121,14 @@ class NetworkGenotype:
         self,
         activation_leak: float = 0.9,
         refraction_leak: float = 0.75,
+        weight_threshold: float = 0.05,
     ) -> "NeuralNetwork":
         """Create a NeuralNetwork from this genotype.
 
         Args:
             activation_leak: Leak factor for activations (0-1). Default from exp_outputs.py.
             refraction_leak: Leak factor during refractory period (0-1). Default from exp_outputs.py.
+            weight_threshold: Minimum |weight| to have effect (0 = disabled). Default 0.05.
         """
         net = NeuralNetwork(
             num_neurons=self.num_neurons,
@@ -142,6 +147,7 @@ class NetworkGenotype:
         net.state.activation_leak = activation_leak
         net.state.use_refraction_decay = True
         net.state.refraction_leak = refraction_leak
+        net.state.weight_threshold = weight_threshold
 
         return net
 
@@ -272,13 +278,22 @@ class NeuralNetwork:
         """Return outputs reshaped as (num_readouts, n_outputs_per_readout)."""
         return self.state.get_readout_outputs()
 
+    def _apply_weight_threshold(self, weights: np.ndarray) -> np.ndarray:
+        """Apply weight threshold: weights with |w| < threshold contribute 0."""
+        if self.state.weight_threshold <= 0:
+            return weights
+        # Hard threshold: zero out small weights
+        return np.where(np.abs(weights) >= self.state.weight_threshold, weights, 0)
+
     def tick(self, step: int):
         """Vectorized network tick - update all neurons in parallel."""
         state = self.state
 
         # === 1. Compute incoming activation (matrix-vector multiply) ===
         # incoming[i] = sum of weights from all firing neurons j to neuron i
-        incoming = state.network_weights.T @ state.firing.astype(np.float64)
+        # Apply weight threshold so small weights don't contribute
+        effective_weights = self._apply_weight_threshold(state.network_weights)
+        incoming = effective_weights.T @ state.firing.astype(np.float64)
 
         # === 2. Determine which neurons can receive input (not refractory) ===
         if state.use_refraction_decay:
@@ -338,7 +353,8 @@ class NeuralNetwork:
 
         # === 8. Calculate outputs (matrix-vector multiply) ===
         new_outputs = state.outputs * state.refraction_leak
-        new_outputs += state.output_weights.T @ new_firing.astype(np.float64)
+        effective_output_weights = self._apply_weight_threshold(state.output_weights)
+        new_outputs += effective_output_weights.T @ new_firing.astype(np.float64)
 
         # === 9. Apply activation leak ===
         if state.use_activation_leak:
@@ -431,6 +447,10 @@ class NeuralNetwork:
 
     def disable_activation_leak(self):
         self.state.use_activation_leak = False
+
+    def set_weight_threshold(self, threshold: float = 0.05):
+        """Set minimum weight magnitude to have effect. Weights with |w| < threshold are ignored."""
+        self.state.weight_threshold = max(0, threshold)
 
     def enable_refraction_decay(
         self,
