@@ -670,6 +670,7 @@ def _plot_mutation_stats(
 
     # Split by strategy
     by_strategy: dict[AnnealStrategy, list[SuccessfulMutation]] = {
+        AnnealStrategy.NONE: [],
         AnnealStrategy.SCALE_UP: [],
         AnnealStrategy.SCALE_DOWN: [],
         AnnealStrategy.RATE_UP: [],
@@ -681,6 +682,7 @@ def _plot_mutation_stats(
 
     # Colors for each strategy
     colors = {
+        AnnealStrategy.NONE: "#7f8c8d",  # Gray - baseline
         AnnealStrategy.SCALE_UP: "#e74c3c",  # Red - aggressive
         AnnealStrategy.SCALE_DOWN: "#3498db",  # Blue - conservative
         AnnealStrategy.RATE_UP: "#e67e22",  # Orange - spread mutations
@@ -688,6 +690,7 @@ def _plot_mutation_stats(
     }
 
     strategy_labels = {
+        AnnealStrategy.NONE: "None",
         AnnealStrategy.SCALE_UP: "Scale ↑",
         AnnealStrategy.SCALE_DOWN: "Scale ↓",
         AnnealStrategy.RATE_UP: "Rate ↑",
@@ -928,23 +931,31 @@ def run_evolution(
         prev_best_fitness = results[0].fitness if results else 0.0
 
         # Generate offspring via mutation (round-robin until we hit target)
-        # Split into 4 quarters to test different annealing strategies:
-        #   Q1: SCALE_UP   - increase mutation magnitude with age (explore)
-        #   Q2: SCALE_DOWN - decrease mutation magnitude with age (fine-tune)
-        #   Q3: RATE_UP    - mutate more genes with age
-        #   Q4: RATE_DOWN  - preserve more genes with age
+        # Split into 5 fifths to test different annealing strategies:
+        #   Q1: NONE       - baseline, no annealing (control group)
+        #   Q2: SCALE_UP   - increase mutation magnitude with age (explore)
+        #   Q3: SCALE_DOWN - decrease mutation magnitude with age (fine-tune)
+        #   Q4: RATE_UP    - mutate more genes with age
+        #   Q5: RATE_DOWN  - preserve more genes with age
         offspring = []
         parent_idx = 0
-        quarter = config.num_offspring // 4
+        fifth = config.num_offspring // 5
 
         while len(offspring) < config.num_offspring:
             parent = population[parent_idx % len(population)]
             parent_age = current_gen - parent.generation_born
             idx = len(offspring)
 
-            # Determine annealing strategy based on offspring index (4 quarters)
-            if idx < quarter:
-                # Q1: SCALE_UP - increase mutation magnitude with age
+            # Determine annealing strategy based on offspring index (5 fifths)
+            if idx < fifth:
+                # Q1: NONE - baseline, no annealing
+                strategy = AnnealStrategy.NONE
+                weight_rate = config.weight_mutation_rate
+                weight_scale = config.weight_mutation_scale
+                threshold_rate = config.threshold_mutation_rate
+                threshold_scale = config.threshold_mutation_scale
+            elif idx < 2 * fifth:
+                # Q2: SCALE_UP - increase mutation magnitude with age
                 strategy = AnnealStrategy.SCALE_UP
                 weight_scale = compute_annealed_value(
                     config.weight_mutation_scale,
@@ -962,8 +973,8 @@ def run_evolution(
                 )
                 weight_rate = config.weight_mutation_rate
                 threshold_rate = config.threshold_mutation_rate
-            elif idx < 2 * quarter:
-                # Q2: SCALE_DOWN - decrease mutation magnitude with age (fine-tune)
+            elif idx < 3 * fifth:
+                # Q3: SCALE_DOWN - decrease mutation magnitude with age (fine-tune)
                 strategy = AnnealStrategy.SCALE_DOWN
                 weight_scale = compute_annealed_value(
                     config.weight_mutation_scale,
@@ -981,8 +992,8 @@ def run_evolution(
                 )
                 weight_rate = config.weight_mutation_rate
                 threshold_rate = config.threshold_mutation_rate
-            elif idx < 3 * quarter:
-                # Q3: RATE_UP - mutate more genes with age
+            elif idx < 4 * fifth:
+                # Q4: RATE_UP - mutate more genes with age
                 strategy = AnnealStrategy.RATE_UP
                 weight_rate = compute_annealed_value(
                     config.weight_mutation_rate,
@@ -1004,7 +1015,7 @@ def run_evolution(
                 weight_scale = config.weight_mutation_scale
                 threshold_scale = config.threshold_mutation_scale
             else:
-                # Q4: RATE_DOWN - preserve more genes with age
+                # Q5: RATE_DOWN - preserve more genes with age
                 strategy = AnnealStrategy.RATE_DOWN
                 weight_rate = compute_annealed_value(
                     config.weight_mutation_rate,
