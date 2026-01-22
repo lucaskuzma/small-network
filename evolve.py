@@ -85,10 +85,16 @@ class Individual:
     mutation_params: Optional[MutationParams] = (
         None  # Params used to create this individual
     )
+    root_id: Optional[str] = (
+        None  # ID of the original gen-0 ancestor (for lineage tracking)
+    )
 
     def __post_init__(self):
         if not self.id:
             self.id = compute_genotype_hash(self.genotype)
+        # If no root_id set and no parent, this is a root
+        if self.root_id is None and self.parent_id is None:
+            self.root_id = self.id
 
     def mutate_to_child(
         self,
@@ -114,6 +120,7 @@ class Individual:
             parent_id=self.id,
             generation_born=current_generation,
             mutation_params=params,
+            root_id=self.root_id,  # Inherit lineage from parent
         )
 
 
@@ -393,8 +400,8 @@ class EvolutionConfig:
     # Annealing parameters: mutation params grow with parent age to escape stagnation
     # annealed_value = base_value * (1 + anneal_factor * parent_age)
     # Capped at anneal_max_multiplier * base_value
-    anneal_factor: float = 0.02  # How much to increase per generation of age
-    anneal_max_multiplier: float = 5.0  # Cap at 5x base value
+    anneal_factor: float = 0.1  # How much to increase per generation of age
+    anneal_max_multiplier: float = 10.0  # Cap at 5x base value
 
     # Output
     output_dir: str = "evolve_midi"
@@ -620,6 +627,8 @@ class GenerationStats:
     best_output_max: float = 0.0
     mean_output_max: float = 0.0
     mean_outputs_above_threshold: float = 0.0  # across all individuals
+    # Root lineage counts (how many parents descend from each original ancestor)
+    lineage_counts: dict = field(default_factory=dict)  # root_id -> count in top μ
 
 
 @dataclass
@@ -1129,6 +1138,12 @@ def run_evolution(
         all_output_max = [r.output_max for r in combined_results]
         all_above_thresh = [r.outputs_above_threshold for r in combined_results]
 
+        # Compute lineage counts (how many of top μ descend from each original ancestor)
+        lineage_counts: dict[str, int] = {}
+        for ind in population:
+            root = ind.root_id or ind.id  # Fallback for old individuals without root_id
+            lineage_counts[root] = lineage_counts.get(root, 0) + 1
+
         stats = GenerationStats(
             generation=current_gen,
             best_fitness=fitnesses[0],
@@ -1150,6 +1165,7 @@ def run_evolution(
             best_output_max=best_result.output_max,
             mean_output_max=np.mean(all_output_max),
             mean_outputs_above_threshold=np.mean(all_above_thresh),
+            lineage_counts=lineage_counts,
         )
         history.append(stats)
 
@@ -1278,6 +1294,79 @@ def run_evolution(
 # =============================================================================
 # Visualization
 # =============================================================================
+
+
+def plot_lineage_history(
+    history: list[GenerationStats], save_path: Optional[str] = None
+):
+    """Plot lineage survival over generations as a stacked area chart."""
+    if not history or not history[0].lineage_counts:
+        print("No lineage data to plot.")
+        return
+
+    generations = [s.generation for s in history]
+
+    # Collect all root IDs that ever appear
+    all_roots = set()
+    for s in history:
+        all_roots.update(s.lineage_counts.keys())
+    all_roots = sorted(all_roots)  # Consistent ordering
+
+    # Build data matrix: (num_generations, num_roots)
+    data = np.zeros((len(history), len(all_roots)))
+    for i, s in enumerate(history):
+        for j, root in enumerate(all_roots):
+            data[i, j] = s.lineage_counts.get(root, 0)
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(14, 6))
+
+    # Generate colors for each lineage
+    cmap = plt.cm.get_cmap("tab20", len(all_roots))
+    colors = [cmap(i) for i in range(len(all_roots))]
+
+    # Stacked area chart
+    ax.stackplot(
+        generations,
+        data.T,
+        labels=[f"L{i}" for i in range(len(all_roots))],
+        colors=colors,
+        alpha=0.8,
+    )
+
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("Number of Parents from Lineage")
+    ax.set_title("Lineage Survival Over Generations")
+    ax.set_xlim(generations[0], generations[-1])
+    ax.set_ylim(0, data.sum(axis=1).max())
+
+    # Legend (only show lineages that survived past gen 1)
+    surviving_at_end = [
+        root for root in all_roots if history[-1].lineage_counts.get(root, 0) > 0
+    ]
+    if len(all_roots) <= 10:
+        ax.legend(loc="upper right", fontsize=8)
+    else:
+        # Too many to show all - just note how many survive
+        ax.text(
+            0.98,
+            0.98,
+            f"{len(surviving_at_end)}/{len(all_roots)} lineages survive",
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+            fontsize=10,
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        )
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Lineage plot saved to: {save_path}")
+        plt.close(fig)
+    else:
+        plt.show()
 
 
 def plot_evolution_history(
@@ -1584,7 +1673,7 @@ if __name__ == "__main__":
             num_offspring=100,  # All offspring from mutation (4 strategies, 25 each)
             num_randoms=0,  # Mutations proven more effective than randoms
             generations=args.generations,
-            random_seed=45,
+            random_seed=42,
             save_every_n_generations=5,
             encoding=args.encoding,
             evaluator=args.eval,
@@ -1613,6 +1702,10 @@ if __name__ == "__main__":
     # Plot results
     plot_path = os.path.join(config.output_dir, "evolution_history.png")
     plot_evolution_history(history, save_path=plot_path)
+
+    # Plot lineage survival
+    lineage_path = os.path.join(config.output_dir, "lineage_history.png")
+    plot_lineage_history(history, save_path=lineage_path)
 
     # Save best genotype
     genotype_path = os.path.join(config.output_dir, "best_genotype.pkl")
