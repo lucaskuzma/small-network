@@ -57,17 +57,17 @@ class BasicAnalyzer:
         self,
         modal_weight: float = 0.67,  # 2:1 ratio - modality is harder to learn
         activity_weight: float = 0.33,
-        min_note_density: float = 4,
+        target_notes: int = 128,  # Target note count (should match sim_steps from evolve.py)
     ):
         """
         Args:
             modal_weight: Weight for modal consistency (0-1)
             activity_weight: Weight for activity (0-1)
-            min_note_density: Notes per beat for full activity score
+            target_notes: Target note count for activity=1.0 (typically = sim_steps)
         """
         self.modal_weight = modal_weight
         self.activity_weight = activity_weight
-        self.min_note_density = min_note_density
+        self.target_notes = target_notes
 
     def load_midi(self, midi_path: str) -> Tuple[List[dict], int, int]:
         """
@@ -159,34 +159,43 @@ class BasicAnalyzer:
         self, notes: List[dict], duration_ticks: int, ticks_per_beat: int
     ) -> Tuple[float, float]:
         """
-        Compute activity score based on note density (notes per beat per voice).
+        Compute activity score based on note count vs target.
+
+        Peaked function: score=1.0 at target, decreases for both over and under.
+        Uses ratio-based scoring that's symmetric in log space.
 
         Returns: (activity_score, note_density)
-            activity_score: 0-1 (0 = silent, 1 = enough activity)
-            note_density: notes per beat per voice
+            activity_score: 0-1 (1 = exactly target notes)
+            note_density: notes per beat (for display)
         """
         note_count = len(notes)
 
-        if note_count == 0 or duration_ticks == 0:
+        if duration_ticks == 0:
             return 0.0, 0.0
 
-        # Count number of voices
-        voices = set((n["track"], n["channel"]) for n in notes)
-        num_voices = max(len(voices), 1)
-
-        # Compute duration in beats
+        # Compute note density for display
         duration_beats = duration_ticks / ticks_per_beat
+        note_density = note_count / duration_beats if duration_beats > 0 else 0.0
 
-        # Note density = notes per beat PER VOICE
-        note_density = note_count / duration_beats / num_voices
+        if note_count == 0:
+            return 0.0, note_density
 
-        if note_density >= self.min_note_density:
-            return 1.0, note_density
+        # Peaked activity: penalize both over and under target
+        # Use ratio to be symmetric: 64 notes and 256 notes both 2x off from 128
+        # score = 1 - |log2(count/target)| / max_log2_deviation
+        # At target: score = 1.0
+        # At half or double: score = 0.5
+        # At quarter or quadruple: score = 0.0
+        ratio = note_count / self.target_notes
+        if ratio <= 0:
+            return 0.0, note_density
 
-        # Ramp from 0 to 1 as density approaches min_note_density
-        # Use sqrt for gentler ramp
-        score = np.sqrt(note_density / self.min_note_density)
-        return score, note_density
+        log_deviation = abs(np.log2(ratio))
+        # 2 octaves (4x) of deviation = score 0
+        max_deviation = 2.0
+        score = max(0.0, 1.0 - log_deviation / max_deviation)
+
+        return float(score), note_density
 
     def analyze(self, midi_path: str) -> BasicMetrics:
         """

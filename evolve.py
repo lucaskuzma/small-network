@@ -448,6 +448,12 @@ class EvalResult:
     modal_consistency: float = 0.0  # 0-1, how well notes fit a scale
     activity: float = 0.0  # 0-1, based on note density
     midi_path: Optional[str] = None
+    # Output statistics for debugging activity ceiling
+    output_max: float = 0.0  # max output value across all timesteps
+    output_min: float = 0.0  # min output value
+    outputs_above_threshold: float = (
+        0.0  # fraction of (timestep, voice) pairs above 0.3
+    )
 
 
 def evaluate_genotype(
@@ -486,6 +492,14 @@ def evaluate_genotype(
     total_firing_events = int(np.sum(firing_history))
     mean_activation = float(np.mean(output_history))
 
+    # Output statistics for debugging activity ceiling
+    output_max = float(np.max(output_history))
+    output_min = float(np.min(output_history))
+    # For argmax: check how many (timestep, voice) have max output > 0.3
+    # Shape is (T, num_voices, n_pitches) - take max over pitches for each (t, voice)
+    max_per_voice_per_step = np.max(output_history, axis=2)  # (T, num_voices)
+    outputs_above_threshold = float(np.mean(max_per_voice_per_step > 0.3))
+
     # Compute activity trend: ratio of 2nd half to 1st half firing
     midpoint = config.sim_steps // 2
     first_half_firing = np.sum(firing_history[:midpoint])
@@ -509,6 +523,9 @@ def evaluate_genotype(
             mean_activation=mean_activation,
             activity_trend=activity_trend,
             midi_path=None,
+            output_max=output_max,
+            output_min=output_min,
+            outputs_above_threshold=outputs_above_threshold,
         )
 
     # Convert outputs to MIDI using mapper (auto-created from config.encoding)
@@ -530,7 +547,7 @@ def evaluate_genotype(
     activity = 0.0
     try:
         if config.evaluator == "basic":
-            metrics = evaluate_basic(temp_midi)
+            metrics = evaluate_basic(temp_midi, target_notes=config.sim_steps)
             fitness = metrics.composite_score
             note_count = metrics.note_count
             note_density = metrics.note_density
@@ -563,6 +580,9 @@ def evaluate_genotype(
         modal_consistency=modal_consistency,
         activity=activity,
         midi_path=midi_filename if save_midi else None,
+        output_max=output_max,
+        output_min=output_min,
+        outputs_above_threshold=outputs_above_threshold,
     )
 
 
@@ -596,6 +616,10 @@ class GenerationStats:
     best_modal_consistency: float = 0.0
     best_activity: float = 0.0
     best_note_count: int = 0
+    # Output statistics for debugging activity ceiling
+    best_output_max: float = 0.0
+    mean_output_max: float = 0.0
+    mean_outputs_above_threshold: float = 0.0  # across all individuals
 
 
 @dataclass
@@ -1090,6 +1114,10 @@ def run_evolution(
             lineage_ids.add(ind.parent_id if ind.parent_id else ind.id)
         unique_lineages = len(lineage_ids)
 
+        # Compute output statistics across all evaluated individuals
+        all_output_max = [r.output_max for r in combined_results]
+        all_above_thresh = [r.outputs_above_threshold for r in combined_results]
+
         stats = GenerationStats(
             generation=current_gen,
             best_fitness=fitnesses[0],
@@ -1108,6 +1136,9 @@ def run_evolution(
             best_modal_consistency=best_result.modal_consistency,
             best_activity=best_result.activity,
             best_note_count=best_result.note_count,
+            best_output_max=best_result.output_max,
+            mean_output_max=np.mean(all_output_max),
+            mean_outputs_above_threshold=np.mean(all_above_thresh),
         )
         history.append(stats)
 
@@ -1152,6 +1183,7 @@ def run_evolution(
             f"Best: {stats.best_fitness:.4f} | "
             f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} | "
             f"notes:{best_result.note_count:3d} | "
+            f"out_max:{best_result.output_max:.2f} >thr:{stats.mean_outputs_above_threshold:.0%} | "
             f"[{survival_str}] | "
             f"age:{stats.best_age:2d} | "
             f"parents: mut={n_parents_from_mutation} rnd={n_parents_from_random} | "
@@ -1477,7 +1509,7 @@ def get_n_outputs_for_encoding(encoding: str) -> int:
     if encoding == "pitch":
         return 12
     elif encoding == "motion":
-        return 8
+        return 7  # 6 motion bits + 1 velocity gate
     else:
         raise ValueError(f"Unknown encoding: {encoding}")
 

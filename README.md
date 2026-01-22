@@ -8,7 +8,7 @@ Evolving spiking neural networks for ambient music generation.
 # Fresh run with pitch encoding (default, 12 chromatic outputs per voice)
 python evolve.py --generations 50
 
-# Fresh run with motion encoding (8 outputs per voice)
+# Fresh run with motion encoding (7 outputs per voice)
 python evolve.py --encoding motion --generations 50
 
 # Resume from checkpoint
@@ -25,12 +25,11 @@ python evolve.py --resume evolve_midi/<run>/checkpoint.pkl --generations 20
 
 ### Motion Encoding
 
-- **8 outputs per voice** — `[u1, u4, u7, d1, d3, d8, v1, v2]`
+- **7 outputs per voice** — `[u1, u4, u7, d1, d3, d8, vel]`
 - **Motion** = `(u1×1 + u4×4 + u7×7) - (d1×1 + d3×3 + d8×8)` — competing forces
-- **Velocity** = `v1 × v2` — soft AND, both must be active
+- **Velocity** = single gate, note triggers when `vel > 0.3`
 - Pitch wraps modulo 12 within each voice's octave
 - All voices start at unison (C in their respective octaves)
-- Favors holds (~9%) and third intervals over stepwise motion
 
 ## Evolution Parameters
 

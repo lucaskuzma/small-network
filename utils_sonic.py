@@ -538,13 +538,13 @@ def save_motion_outputs_as_midi(
     """
     Save network outputs as MIDI using motion encoding.
 
-    Output mapping per voice (8 outputs):
-      [u1, u4, u7, d1, d3, d8, v1, v2]
+    Output mapping per voice (7 outputs):
+      [u1, u4, u7, d1, d3, d8, vel]
 
       Motion = (u1×1 + u4×4 + u7×7) - (d1×1 + d3×3 + d8×8)
       Range: -12 to +12 semitones
 
-      Velocity = |v1 - v2| (soft XOR, high when they differ)
+      Velocity = output[6] directly (single gate, simpler than XOR)
       Note triggered when velocity > threshold.
 
     Behavior:
@@ -554,19 +554,19 @@ def save_motion_outputs_as_midi(
       - Sustain: note continues when velocity high but motion = 0
 
     Args:
-        output_history: numpy array of shape (T, num_voices, 8)
+        output_history: numpy array of shape (T, num_voices, 7)
         filename: output MIDI filename
         tempo: beats per minute
-        velocity_threshold: minimum |v1-v2| to trigger/sustain a note
+        velocity_threshold: minimum velocity to trigger/sustain a note
         start_pitches: starting MIDI note per voice (default: [48, 60, 72, 84] = C3-C6)
         velocity_range: (min, max) MIDI velocity range (default: 70-100 for narrow dynamics)
     """
     from mido import Message, MidiFile, MidiTrack, MetaMessage
 
     # Parse output_history shape
-    if len(output_history.shape) != 3 or output_history.shape[2] != 8:
+    if len(output_history.shape) != 3 or output_history.shape[2] != 7:
         raise ValueError(
-            f"output_history must be 3D with 8 outputs per voice (T, voices, 8), "
+            f"output_history must be 3D with 7 outputs per voice (T, voices, 7), "
             f"got shape {output_history.shape}"
         )
 
@@ -626,8 +626,8 @@ def save_motion_outputs_as_midi(
             down_sum = np.dot(down_bits, down_weights)
             motion = up_sum - down_sum
 
-            # Compute velocity from outputs 6-7 (soft XOR: high when they differ)
-            vel_raw = np.abs(outputs[6] - outputs[7])
+            # Compute velocity from output 6 (single gate)
+            vel_raw = outputs[6]
             voice_threshold = vel_thresholds[voice_idx]
             vel_active = vel_raw > voice_threshold
 
@@ -707,7 +707,7 @@ def save_motion_outputs_as_midi(
     print(f"  Tempo: {tempo} BPM")
     print(f"  Duration: {num_steps} steps ({num_steps * ticks_per_16th} ticks)")
     print(f"  Voices: {num_voices}")
-    print(f"  Encoding: motion [u1,u4,u7,d1,d3,d8,v1,v2]")
+    print(f"  Encoding: motion [u1,u4,u7,d1,d3,d8,vel]")
     print(f"  Start pitches: {start_pitches[:num_voices]}")
     print(f"  Velocity thresholds: {[f'{t:.3f}' for t in vel_thresholds]}")
     print(f"  Velocity range: {velocity_range[0]}-{velocity_range[1]}")
