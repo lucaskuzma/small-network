@@ -16,10 +16,33 @@ from datetime import datetime
 from typing import Optional, Union
 from tqdm import tqdm
 
+from enum import Enum
 from network import NeuralNetwork, NetworkGenotype
 from eval_ambient import evaluate_ambient
 from eval_basic import evaluate_basic
 from typing import Callable, Protocol
+
+
+class AnnealStrategy(Enum):
+    """Strategy for annealing mutation parameters based on parent age."""
+
+    NONE = "none"  # No annealing (baseline)
+    SCALE_UP = "scale_up"  # Increase mutation scale with age (explore more)
+    SCALE_DOWN = "scale_down"  # Decrease mutation scale with age (fine-tune)
+    RATE_UP = "rate_up"  # Increase mutation rate with age (mutate more genes)
+    RATE_DOWN = "rate_down"  # Decrease mutation rate with age (preserve more)
+
+
+@dataclass
+class MutationParams:
+    """Records the actual mutation parameters used to create an individual."""
+
+    weight_rate: float = 0.0
+    weight_scale: float = 0.0
+    threshold_rate: float = 0.0
+    threshold_scale: float = 0.0
+    parent_age: int = 0
+    strategy: AnnealStrategy = AnnealStrategy.NONE
 
 
 class MidiMapper(Protocol):
@@ -59,20 +82,38 @@ class Individual:
     id: str = field(default_factory=lambda: "")
     parent_id: Optional[str] = None  # None = fresh random, set = mutation of parent
     generation_born: int = 0
+    mutation_params: Optional[MutationParams] = (
+        None  # Params used to create this individual
+    )
 
     def __post_init__(self):
         if not self.id:
             self.id = compute_genotype_hash(self.genotype)
 
     def mutate_to_child(
-        self, current_generation: int, **mutation_kwargs
+        self,
+        current_generation: int,
+        strategy: AnnealStrategy = AnnealStrategy.NONE,
+        **mutation_kwargs,
     ) -> "Individual":
         """Create a mutated child with tracking."""
         child_genotype = self.genotype.mutate(**mutation_kwargs)
+
+        # Record the actual mutation params used
+        params = MutationParams(
+            weight_rate=mutation_kwargs.get("weight_mutation_rate", 0.0),
+            weight_scale=mutation_kwargs.get("weight_mutation_scale", 0.0),
+            threshold_rate=mutation_kwargs.get("threshold_mutation_rate", 0.0),
+            threshold_scale=mutation_kwargs.get("threshold_mutation_scale", 0.0),
+            parent_age=current_generation - self.generation_born,
+            strategy=strategy,
+        )
+
         return Individual(
             genotype=child_genotype,
             parent_id=self.id,
             generation_born=current_generation,
+            mutation_params=params,
         )
 
 
@@ -332,8 +373,10 @@ class EvolutionConfig:
 
     # Evolution parameters
     mu: int = 20  # Number of parents to keep
-    num_offspring: int = 50  # Number of mutated offspring per generation
-    num_randoms: int = 50  # Number of fresh randoms per generation
+    num_offspring: int = 100  # Number of mutated offspring per generation
+    num_randoms: int = (
+        0  # Number of fresh randoms per generation (mutations proven more effective)
+    )
     generations: int = 50
 
     # Simulation parameters
@@ -346,6 +389,12 @@ class EvolutionConfig:
     threshold_mutation_rate: float = 0.1
     threshold_mutation_scale: float = 0.001
     refraction_mutation_rate: float = 0
+
+    # Annealing parameters: mutation params grow with parent age to escape stagnation
+    # annealed_value = base_value * (1 + anneal_factor * parent_age)
+    # Capped at anneal_max_multiplier * base_value
+    anneal_factor: float = 0.02  # How much to increase per generation of age
+    anneal_max_multiplier: float = 5.0  # Cap at 5x base value
 
     # Output
     output_dir: str = "evolve_midi"
@@ -549,6 +598,198 @@ class GenerationStats:
     best_note_count: int = 0
 
 
+@dataclass
+class SuccessfulMutation:
+    """Records a mutation that led to fitness improvement."""
+
+    generation: int
+    fitness_before: float
+    fitness_after: float
+    params: MutationParams
+
+
+def compute_annealed_value(
+    base_value: float,
+    parent_age: int,
+    anneal_factor: float,
+    max_multiplier: float,
+    increase: bool = True,
+) -> float:
+    """Compute annealed mutation parameter based on parent age.
+
+    Args:
+        base_value: Base mutation parameter value
+        parent_age: How many generations since parent was born
+        anneal_factor: How much to change per generation
+        max_multiplier: Maximum/minimum multiplier to apply
+        increase: If True, increase value with age; if False, decrease
+
+    Returns:
+        Annealed value, capped at max_multiplier (or min 1/max_multiplier if decreasing)
+    """
+    if increase:
+        multiplier = min(1.0 + anneal_factor * parent_age, max_multiplier)
+    else:
+        # Decrease: multiplier goes from 1.0 down to 1/max_multiplier
+        multiplier = max(1.0 / (1.0 + anneal_factor * parent_age), 1.0 / max_multiplier)
+    return base_value * multiplier
+
+
+def _plot_mutation_stats(
+    successful_mutations: list[SuccessfulMutation],
+    output_dir: str,
+) -> None:
+    """Plot summary statistics for successful mutations as histograms."""
+    if not successful_mutations:
+        print("\nNo successful mutations recorded.")
+        return
+
+    # Split by strategy
+    by_strategy: dict[AnnealStrategy, list[SuccessfulMutation]] = {
+        AnnealStrategy.SCALE_UP: [],
+        AnnealStrategy.SCALE_DOWN: [],
+        AnnealStrategy.RATE_UP: [],
+        AnnealStrategy.RATE_DOWN: [],
+    }
+    for m in successful_mutations:
+        if m.params.strategy in by_strategy:
+            by_strategy[m.params.strategy].append(m)
+
+    # Colors for each strategy
+    colors = {
+        AnnealStrategy.SCALE_UP: "#e74c3c",  # Red - aggressive
+        AnnealStrategy.SCALE_DOWN: "#3498db",  # Blue - conservative
+        AnnealStrategy.RATE_UP: "#e67e22",  # Orange - spread mutations
+        AnnealStrategy.RATE_DOWN: "#27ae60",  # Green - focused mutations
+    }
+
+    strategy_labels = {
+        AnnealStrategy.SCALE_UP: "Scale ↑",
+        AnnealStrategy.SCALE_DOWN: "Scale ↓",
+        AnnealStrategy.RATE_UP: "Rate ↑",
+        AnnealStrategy.RATE_DOWN: "Rate ↓",
+    }
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+    # ===== Plot 1: Success count by strategy (bar chart) =====
+    ax = axes[0, 0]
+    strategies = list(by_strategy.keys())
+    counts = [len(by_strategy[s]) for s in strategies]
+    bars = ax.bar(
+        [strategy_labels[s] for s in strategies],
+        counts,
+        color=[colors[s] for s in strategies],
+        edgecolor="black",
+        linewidth=1.5,
+    )
+    ax.set_ylabel("Number of Successful Mutations")
+    ax.set_title("Success Count by Annealing Strategy")
+    # Add count labels on bars
+    for bar, count in zip(bars, counts):
+        if count > 0:
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.5,
+                str(count),
+                ha="center",
+                va="bottom",
+                fontsize=12,
+                fontweight="bold",
+            )
+    ax.set_ylim(0, max(counts) * 1.15 if counts and max(counts) > 0 else 1)
+
+    # ===== Plot 2: Parent age distribution by strategy (overlapping histograms) =====
+    ax = axes[0, 1]
+    max_age = max((m.params.parent_age for m in successful_mutations), default=1)
+    bins = np.linspace(0, max_age, min(20, max_age + 1))
+    for strategy in strategies:
+        ages = [m.params.parent_age for m in by_strategy[strategy]]
+        if ages:
+            ax.hist(
+                ages,
+                bins=bins,
+                alpha=0.5,
+                label=f"{strategy_labels[strategy]} (n={len(ages)})",
+                color=colors[strategy],
+                edgecolor=colors[strategy],
+                linewidth=1.5,
+            )
+    ax.set_xlabel("Parent Age (generations)")
+    ax.set_ylabel("Count")
+    ax.set_title("Parent Age at Successful Mutation")
+    ax.legend(loc="upper right")
+
+    # ===== Plot 3: Fitness gain distribution by strategy =====
+    ax = axes[1, 0]
+    for strategy in strategies:
+        gains = [m.fitness_after - m.fitness_before for m in by_strategy[strategy]]
+        if gains:
+            ax.hist(
+                gains,
+                bins=15,
+                alpha=0.5,
+                label=f"{strategy_labels[strategy]} (μ={np.mean(gains):.4f})",
+                color=colors[strategy],
+                edgecolor=colors[strategy],
+                linewidth=1.5,
+            )
+    ax.set_xlabel("Fitness Gain")
+    ax.set_ylabel("Count")
+    ax.set_title("Fitness Gain Distribution by Strategy")
+    ax.legend(loc="upper right")
+
+    # ===== Plot 4: Success rate over time (cumulative by generation) =====
+    ax = axes[1, 1]
+    if successful_mutations:
+        max_gen = max(m.generation for m in successful_mutations)
+        gen_bins = np.linspace(0, max_gen, 10)
+
+        for strategy in strategies:
+            gens = [m.generation for m in by_strategy[strategy]]
+            if gens:
+                # Cumulative histogram
+                ax.hist(
+                    gens,
+                    bins=gen_bins,
+                    alpha=0.5,
+                    label=strategy_labels[strategy],
+                    color=colors[strategy],
+                    edgecolor=colors[strategy],
+                    linewidth=1.5,
+                    cumulative=False,
+                )
+        ax.set_xlabel("Generation")
+        ax.set_ylabel("Successes in Period")
+        ax.set_title("Success Timing by Strategy")
+        ax.legend(loc="upper left")
+
+    plt.tight_layout()
+
+    # Save plot
+    plot_path = os.path.join(output_dir, "mutation_strategy_stats.png")
+    plt.savefig(plot_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"\nMutation strategy stats saved to: {plot_path}")
+
+    # Also print a brief summary
+    print(f"\n{'='*60}")
+    print(f"MUTATION STRATEGY SUMMARY ({len(successful_mutations)} total successes)")
+    print("=" * 60)
+    for strategy in strategies:
+        muts = by_strategy[strategy]
+        if muts:
+            gains = [m.fitness_after - m.fitness_before for m in muts]
+            ages = [m.params.parent_age for m in muts]
+            print(
+                f"  {strategy_labels[strategy]:12s}: {len(muts):3d} wins | "
+                f"mean gain={np.mean(gains):.4f} | mean age={np.mean(ages):.1f}"
+            )
+        else:
+            print(f"  {strategy_labels[strategy]:12s}:   0 wins")
+    print("=" * 60)
+
+
 def run_evolution(
     config: EvolutionConfig,
     resume_from: Optional[Union[str, Checkpoint]] = None,
@@ -652,6 +893,9 @@ def run_evolution(
     improvements_from_random = 0  # Improvements from random lineage
     last_saved_fitness = 0.0  # Track to avoid duplicate saves
 
+    # Track successful mutation params for end-of-run analysis
+    successful_mutations: list[SuccessfulMutation] = []
+
     # Get network params for generating randoms
     ref_geno = population[0].genotype
 
@@ -660,16 +904,108 @@ def run_evolution(
         prev_best_fitness = results[0].fitness if results else 0.0
 
         # Generate offspring via mutation (round-robin until we hit target)
+        # Split into 4 quarters to test different annealing strategies:
+        #   Q1: SCALE_UP   - increase mutation magnitude with age (explore)
+        #   Q2: SCALE_DOWN - decrease mutation magnitude with age (fine-tune)
+        #   Q3: RATE_UP    - mutate more genes with age
+        #   Q4: RATE_DOWN  - preserve more genes with age
         offspring = []
         parent_idx = 0
+        quarter = config.num_offspring // 4
+
         while len(offspring) < config.num_offspring:
             parent = population[parent_idx % len(population)]
+            parent_age = current_gen - parent.generation_born
+            idx = len(offspring)
+
+            # Determine annealing strategy based on offspring index (4 quarters)
+            if idx < quarter:
+                # Q1: SCALE_UP - increase mutation magnitude with age
+                strategy = AnnealStrategy.SCALE_UP
+                weight_scale = compute_annealed_value(
+                    config.weight_mutation_scale,
+                    parent_age,
+                    config.anneal_factor,
+                    config.anneal_max_multiplier,
+                    increase=True,
+                )
+                threshold_scale = compute_annealed_value(
+                    config.threshold_mutation_scale,
+                    parent_age,
+                    config.anneal_factor,
+                    config.anneal_max_multiplier,
+                    increase=True,
+                )
+                weight_rate = config.weight_mutation_rate
+                threshold_rate = config.threshold_mutation_rate
+            elif idx < 2 * quarter:
+                # Q2: SCALE_DOWN - decrease mutation magnitude with age (fine-tune)
+                strategy = AnnealStrategy.SCALE_DOWN
+                weight_scale = compute_annealed_value(
+                    config.weight_mutation_scale,
+                    parent_age,
+                    config.anneal_factor,
+                    config.anneal_max_multiplier,
+                    increase=False,
+                )
+                threshold_scale = compute_annealed_value(
+                    config.threshold_mutation_scale,
+                    parent_age,
+                    config.anneal_factor,
+                    config.anneal_max_multiplier,
+                    increase=False,
+                )
+                weight_rate = config.weight_mutation_rate
+                threshold_rate = config.threshold_mutation_rate
+            elif idx < 3 * quarter:
+                # Q3: RATE_UP - mutate more genes with age
+                strategy = AnnealStrategy.RATE_UP
+                weight_rate = compute_annealed_value(
+                    config.weight_mutation_rate,
+                    parent_age,
+                    config.anneal_factor,
+                    config.anneal_max_multiplier,
+                    increase=True,
+                )
+                threshold_rate = compute_annealed_value(
+                    config.threshold_mutation_rate,
+                    parent_age,
+                    config.anneal_factor,
+                    config.anneal_max_multiplier,
+                    increase=True,
+                )
+                # Cap rates at 1.0 (they're probabilities)
+                weight_rate = min(weight_rate, 1.0)
+                threshold_rate = min(threshold_rate, 1.0)
+                weight_scale = config.weight_mutation_scale
+                threshold_scale = config.threshold_mutation_scale
+            else:
+                # Q4: RATE_DOWN - preserve more genes with age
+                strategy = AnnealStrategy.RATE_DOWN
+                weight_rate = compute_annealed_value(
+                    config.weight_mutation_rate,
+                    parent_age,
+                    config.anneal_factor,
+                    config.anneal_max_multiplier,
+                    increase=False,
+                )
+                threshold_rate = compute_annealed_value(
+                    config.threshold_mutation_rate,
+                    parent_age,
+                    config.anneal_factor,
+                    config.anneal_max_multiplier,
+                    increase=False,
+                )
+                weight_scale = config.weight_mutation_scale
+                threshold_scale = config.threshold_mutation_scale
+
             child = parent.mutate_to_child(
                 current_generation=current_gen,
-                weight_mutation_rate=config.weight_mutation_rate,
-                weight_mutation_scale=config.weight_mutation_scale,
-                threshold_mutation_rate=config.threshold_mutation_rate,
-                threshold_mutation_scale=config.threshold_mutation_scale,
+                strategy=strategy,
+                weight_mutation_rate=weight_rate,
+                weight_mutation_scale=weight_scale,
+                threshold_mutation_rate=threshold_rate,
+                threshold_mutation_scale=threshold_scale,
                 refraction_mutation_rate=config.refraction_mutation_rate,
             )
             offspring.append(child)
@@ -789,6 +1125,16 @@ def run_evolution(
                 else:
                     improvements_from_mutation += 1
                     improvement_source = "MUT"
+                    # Record successful mutation params
+                    if new_best.mutation_params is not None:
+                        successful_mutations.append(
+                            SuccessfulMutation(
+                                generation=current_gen,
+                                fitness_before=prev_best_fitness,
+                                fitness_after=fitnesses[0],
+                                params=new_best.mutation_params,
+                            )
+                        )
 
         # Update best ever
         if fitnesses[0] > best_ever_fitness:
@@ -864,6 +1210,9 @@ def run_evolution(
     print(
         f"Evolution complete! Best fitness: {best_ever_fitness:.4f} (ID: {best_ever_individual.id})"
     )
+
+    # Plot successful mutation statistics
+    _plot_mutation_stats(successful_mutations, config.output_dir)
 
     # Save final best (only if improved since last periodic save)
     if best_ever_fitness > last_saved_fitness:
@@ -1189,8 +1538,8 @@ if __name__ == "__main__":
         # Fresh run
         config = EvolutionConfig(
             mu=20,
-            num_offspring=50,
-            num_randoms=50,
+            num_offspring=100,  # All offspring from mutation (4 strategies, 25 each)
+            num_randoms=0,  # Mutations proven more effective than randoms
             generations=args.generations,
             random_seed=45,
             save_every_n_generations=5,
