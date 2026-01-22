@@ -279,84 +279,87 @@ class NeuralNetwork:
         return self.state.get_readout_outputs()
 
     def tick(self, step: int):
-        # Calculate new activations from current firing neurons
-        new_activations = self.state.activations.copy()
-        new_firing = np.zeros(self.state.num_neurons, dtype=bool)
-        new_refractory_counters = self.state.refractory_counters.copy()
+        """Vectorized network tick - update all neurons in parallel."""
+        state = self.state
 
-        for i in range(self.state.num_neurons):
-            # sum up incoming activation from all firing neurons
+        # === 1. Compute incoming activation (matrix-vector multiply) ===
+        # incoming[i] = sum of weights from all firing neurons j to neuron i
+        incoming = state.network_weights.T @ state.firing.astype(np.float64)
 
-            if not self.state.use_refraction_decay or new_refractory_counters[i] == 0:
-                incoming_activation = 0
-                for j in range(self.state.num_neurons):
-                    if self.state.firing[j]:
-                        # add weight from firing neuron j to current neuron i
-                        incoming_activation += self.state.network_weights[j, i]
+        # === 2. Determine which neurons can receive input (not refractory) ===
+        if state.use_refraction_decay:
+            can_receive = state.refractory_counters == 0
+        else:
+            can_receive = np.ones(state.num_neurons, dtype=bool)
 
-                # normalize incoming activation
-                # incoming_activation /= self.state.num_neurons
+        # === 3. Update activations for non-refractory neurons ===
+        new_activations = state.activations.copy()
+        if state.use_tanh_activation:
+            updated = (np.tanh(state.activations + incoming) + 1) / 2
+        else:
+            updated = np.clip(state.activations + incoming, 0, 1)
+        new_activations = np.where(can_receive, updated, new_activations)
 
-                # clip or saturate activation
-                if self.state.use_tanh_activation:
-                    new_activations[i] = (
-                        np.tanh(new_activations[i] + incoming_activation) + 1
-                    ) / 2
-                else:
-                    new_activations[i] = np.clip(
-                        new_activations[i] + incoming_activation, 0, 1
-                    )
+        # === 4. Determine which neurons fire ===
+        new_firing = can_receive & (new_activations >= state.thresholds_current)
 
-                # check if neuron should fire
-                if new_activations[i] >= self.state.thresholds_current[i]:
+        # === 5. Handle post-fire state ===
+        if state.use_refraction_decay:
+            # Set refractory counters for neurons that just fired
+            new_refractory_counters = state.refractory_counters.copy()
+            new_refractory_counters = np.where(
+                new_firing, state.refraction_period, new_refractory_counters
+            )
+        else:
+            # Reset activation to 0 for neurons that fired
+            new_activations = np.where(new_firing, 0, new_activations)
+            new_refractory_counters = state.refractory_counters
 
-                    # fire!
-                    new_firing[i] = True
+        # === 6. Apply refraction leak to neurons that WERE refractory (old counter) ===
+        if state.use_refraction_decay:
+            was_refractory = state.refractory_counters > 0
+            new_activations = np.where(
+                was_refractory,
+                new_activations * state.refraction_leak,
+                new_activations,
+            )
 
-                    if self.state.use_refraction_decay:
-                        new_refractory_counters[i] = self.state.refraction_period[i]
-                    else:
-                        new_activations[i] = 0
+        # === 7. Update threshold variations (for neurons with period > 0) ===
+        has_variation = state.threshold_variation_periods > 0
+        if np.any(has_variation):
+            # Vectorized sinusoidal threshold update
+            phase = (
+                step
+                * 2
+                * np.pi
+                / np.where(has_variation, state.threshold_variation_periods, 1)
+            )
+            variation = np.sin(phase) * state.threshold_variation_ranges
+            new_thresholds = state.thresholds + variation
+            state.thresholds_current = np.where(
+                has_variation,
+                np.clip(new_thresholds, 0, 1),
+                state.thresholds_current,
+            )
 
-            # if self.state.use_refraction_decay:
-            #     if new_refractory_counters[i] > 0:
-            #         new_activations[i] *= self.state.refraction_leak
+        # === 8. Calculate outputs (matrix-vector multiply) ===
+        new_outputs = state.outputs * state.refraction_leak
+        new_outputs += state.output_weights.T @ new_firing.astype(np.float64)
 
-            if self.state.use_refraction_decay:
-                if self.state.refractory_counters[i] > 0:  # Check OLD counter, not new!
-                    new_activations[i] *= self.state.refraction_leak
+        # === 9. Apply activation leak ===
+        if state.use_activation_leak:
+            new_activations *= state.activation_leak
 
-            if self.state.threshold_variation_periods[i] > 0:
-                self.state.thresholds_current[i] = (
-                    np.sin(step * 2 * np.pi / self.state.threshold_variation_periods[i])
-                    * self.state.threshold_variation_ranges[i]
-                ) + self.state.thresholds[i]
-                self.state.thresholds_current[i] = np.clip(
-                    self.state.thresholds_current[i], 0, 1
-                )
-
-        # Calculate outputs based on firing neurons
-        new_outputs = self.state.outputs.copy()
-        new_outputs *= self.state.refraction_leak
-        for i in range(self.state.num_neurons):
-            if new_firing[i]:
-                for j in range(self.state.num_outputs):
-                    new_outputs[j] += self.state.output_weights[i, j]
-
-        # Apply activation leak if enabled
-        if self.state.use_activation_leak:
-            new_activations *= self.state.activation_leak
-
-        # Decrement refractory counters
-        if self.state.use_refraction_decay:
+        # === 10. Decrement refractory counters ===
+        if state.use_refraction_decay:
             new_refractory_counters = np.maximum(0, new_refractory_counters - 1)
 
-        # Update state
-        self.state.activations = new_activations
-        self.state.firing = new_firing
-        self.state.outputs = np.clip(new_outputs, 0, 1)
-        if self.state.use_refraction_decay:
-            self.state.refractory_counters = new_refractory_counters
+        # === Update state ===
+        state.activations = new_activations
+        state.firing = new_firing
+        state.outputs = np.clip(new_outputs, 0, 1)
+        if state.use_refraction_decay:
+            state.refractory_counters = new_refractory_counters
 
     def manual_trigger(self, neuron_index: int):
         if not 0 <= neuron_index < self.state.num_neurons:
