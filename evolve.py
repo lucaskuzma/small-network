@@ -651,11 +651,12 @@ def select_with_speciation(
         slots[best_species] += 1
         remaining -= 1
 
-    # Select top individuals within each species
+    # Select top individuals within each viable species
     selected_pop = []
     selected_results = []
 
-    for species_id, members in species.items():
+    for species_id in slots:  # Only iterate over species with allocated slots
+        members = species[species_id]
         # Sort by fitness within species
         sorted_members = sorted(members, key=lambda x: x[1].fitness, reverse=True)
         # Take allocated slots
@@ -673,7 +674,7 @@ def select_with_speciation(
     return (
         [ind for ind, _ in sorted_pairs],
         [r for _, r in sorted_pairs],
-        len(species),
+        len(viable_species),  # Return count of viable species, not all species
     )
 
 
