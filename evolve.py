@@ -1976,7 +1976,7 @@ if __name__ == "__main__":
             mu=32,
             num_offspring=160,  # 5x parents to try all mutation strategies
             num_randoms=0,  # Randoms score zero with sparse networks
-            use_speciation=True,
+            use_speciation=False,
             num_species=4,
             generations=args.generations,
             random_seed=42,

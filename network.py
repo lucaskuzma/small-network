@@ -119,7 +119,7 @@ class NetworkGenotype:
 
     def to_network(
         self,
-        activation_leak: float = 0.9,
+        activation_leak: float = 0.98,
         refraction_leak: float = 0.75,
         weight_threshold: float = 0.05,
     ) -> "NeuralNetwork":
@@ -201,7 +201,7 @@ class NetworkGenotype:
         new_refraction = new_refraction + mask * np.random.choice(
             [-1, 1], size=new_refraction.shape
         )
-        new_refraction = np.clip(new_refraction, 2, 33).astype(
+        new_refraction = np.clip(new_refraction, 4, 33).astype(
             int
         )  # Match random() range
 
