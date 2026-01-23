@@ -95,8 +95,8 @@ class NetworkGenotype:
             num_readouts=num_readouts,
             n_outputs_per_readout=n_outputs_per_readout,
         )
-        net.randomize_weights(sparsity=0.1, scale=0.4)
-        net.randomize_output_weights(sparsity=0.1, scale=0.2)
+        net.randomize_weights(sparsity=0.025, scale=0.4)
+        net.randomize_output_weights(sparsity=0.025, scale=0.2)
         net.randomize_thresholds()
         net.set_diagonal_weights(0)
         net.enable_refraction_decay(2, 0.75, 32)
