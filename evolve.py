@@ -635,41 +635,58 @@ def select_with_speciation(
         )
 
     # Allocate slots proportional to mean fitness among viable species
+    # Guarantees exactly μ total slots
     total_fitness = sum(viable_species.values())
 
-    # First pass: calculate ideal allocations (minimum 1 per species)
-    raw_slots = {}
-    for species_id, fitness in viable_species.items():
-        proportion = fitness / total_fitness
-        raw_slots[species_id] = max(1, int(proportion * mu))
+    # Start with 1 slot per species (minimum guarantee)
+    slots = {sid: 1 for sid in viable_species}
+    remaining = mu - len(viable_species)
 
-    # Scale down if over-allocated
-    total_allocated = sum(raw_slots.values())
-    if total_allocated > mu:
-        scale = mu / total_allocated
-        slots = {sid: max(1, int(raw_slots[sid] * scale)) for sid in raw_slots}
-    else:
-        slots = raw_slots.copy()
+    # Distribute remaining slots proportionally by fitness
+    if remaining > 0 and total_fitness > 0:
+        # Calculate proportional shares for remaining slots
+        for species_id, fitness in viable_species.items():
+            extra = int((fitness / total_fitness) * remaining)
+            slots[species_id] += extra
 
-    # Distribute remaining slots to highest fitness species
-    remaining = mu - sum(slots.values())
-    while remaining > 0:
-        best_species = max(viable_species, key=viable_species.get)
-        slots[best_species] += 1
-        remaining -= 1
+        # Distribute any leftover slots to highest fitness species
+        leftover = mu - sum(slots.values())
+        sorted_species = sorted(
+            viable_species.keys(), key=lambda s: viable_species[s], reverse=True
+        )
+        for i in range(leftover):
+            slots[sorted_species[i % len(sorted_species)]] += 1
 
     # Select top individuals within each viable species
     selected_pop = []
     selected_results = []
+    selected_ids = set()
 
     for species_id in slots:  # Only iterate over species with allocated slots
         members = species[species_id]
         # Sort by fitness within species
         sorted_members = sorted(members, key=lambda x: x[1].fitness, reverse=True)
-        # Take allocated slots
+        # Take up to allocated slots (may be fewer if species is small)
         for ind, result in sorted_members[: slots[species_id]]:
             selected_pop.append(ind)
             selected_results.append(result)
+            selected_ids.add(ind.id)
+
+    # If we don't have enough (species too small), fill with best remaining from pool
+    if len(selected_pop) < mu:
+        # Get all individuals sorted by fitness
+        all_sorted = sorted(
+            zip(combined_pop, combined_results),
+            key=lambda x: x[1].fitness,
+            reverse=True,
+        )
+        for ind, result in all_sorted:
+            if ind.id not in selected_ids:
+                selected_pop.append(ind)
+                selected_results.append(result)
+                selected_ids.add(ind.id)
+                if len(selected_pop) >= mu:
+                    break
 
     # Final sort by fitness for consistent ordering
     sorted_pairs = sorted(
@@ -678,11 +695,20 @@ def select_with_speciation(
         reverse=True,
     )
 
+    # Update slots to reflect actual counts
+    actual_slots = {}
+    for species_id in slots:
+        actual_slots[species_id] = sum(
+            1
+            for ind in selected_pop
+            if any(ind.id == m[0].id for m in species.get(species_id, []))
+        )
+
     return (
-        [ind for ind, _ in sorted_pairs],
-        [r for _, r in sorted_pairs],
-        len(viable_species),  # Return count of viable species, not all species
-        slots,  # species_id -> count of parents in that species
+        [ind for ind, _ in sorted_pairs[:mu]],  # Ensure exactly mu
+        [r for _, r in sorted_pairs[:mu]],
+        len(viable_species),
+        actual_slots,
     )
 
 
