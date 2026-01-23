@@ -59,9 +59,9 @@ class BasicAnalyzer:
 
     def __init__(
         self,
-        modal_weight: float = 1 / 3,
-        activity_weight: float = 1 / 3,
-        diversity_weight: float = 1 / 3,
+        modal_weight: float = 1 / 4,
+        activity_weight: float = 1 / 4,
+        diversity_weight: float = 1 / 2,
         target_notes: int = 128,  # Target note count (should match sim_steps from evolve.py)
     ):
         """
