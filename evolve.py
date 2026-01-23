@@ -167,6 +167,7 @@ def suppress_stdout():
 def _save_generation_plot(
     parent_fitnesses: list[float],
     parent_from_random: list[bool],
+    parent_ages: list[int],
     offspring_fitnesses: list[float],
     random_fitnesses: list[float],
     offspring_modality: list[float],
@@ -195,17 +196,30 @@ def _save_generation_plot(
     random_x = np.linspace(0.7, 0.95, n_randoms) if n_randoms > 0 else []
 
     # Parents - color by lineage (green = from mutation, purple = from random)
+    # Opacity by age (older = more opaque, capped at age 50)
     n_from_random = sum(parent_from_random)
     n_from_mutation = n_parents - n_from_random
-    parent_colors = ["#9b59b6" if rnd else "#2ecc71" for rnd in parent_from_random]
+
+    # Convert hex colors to RGBA with age-based alpha
+    import matplotlib.colors as mcolors
+
+    max_age = 50
+    min_alpha, max_alpha = 0.3, 1.0
+
+    parent_colors_rgba = []
+    for rnd, age in zip(parent_from_random, parent_ages):
+        base_color = "#9b59b6" if rnd else "#2ecc71"
+        rgb = mcolors.to_rgb(base_color)
+        # Alpha increases with age: min_alpha at age 0, max_alpha at age >= max_age
+        alpha = min_alpha + (max_alpha - min_alpha) * min(age / max_age, 1.0)
+        parent_colors_rgba.append((*rgb, alpha))
 
     if n_parents > 0:
         ax.scatter(
             parent_x,
             parent_fitnesses,
-            c=parent_colors,
+            c=parent_colors_rgba,
             s=120,
-            alpha=0.9,
             edgecolors="black",
             linewidths=1.5,
             zorder=4,
@@ -1124,6 +1138,7 @@ def run_evolution(
         parent_fitnesses = [r.fitness for r in results]
         # parent_id is None means it was a fresh random, not None means it was a mutation
         parent_from_random = [ind.parent_id is None for ind in population]
+        parent_ages = [current_gen - ind.generation_born for ind in population]
         offspring_fitnesses_for_plot = [r.fitness for r in offspring_results]
         offspring_modality_for_plot = [r.modal_consistency for r in offspring_results]
         offspring_activity_for_plot = [r.activity for r in offspring_results]
@@ -1253,6 +1268,7 @@ def run_evolution(
         _save_generation_plot(
             parent_fitnesses=parent_fitnesses,
             parent_from_random=parent_from_random,
+            parent_ages=parent_ages,
             offspring_fitnesses=offspring_fitnesses_for_plot,
             random_fitnesses=random_fitnesses_for_plot,
             offspring_modality=offspring_modality_for_plot,
