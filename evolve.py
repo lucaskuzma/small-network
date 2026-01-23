@@ -453,6 +453,7 @@ class EvalResult:
     note_density: float = 0.0  # notes per beat
     modal_consistency: float = 0.0  # 0-1, how well notes fit a scale
     activity: float = 0.0  # 0-1, based on note density
+    diversity: float = 0.0  # 0-1, pitch variety + anti-repetition
     midi_path: Optional[str] = None
     # Output statistics for debugging activity ceiling
     output_max: float = 0.0  # max output value across all timesteps
@@ -547,6 +548,7 @@ def evaluate_genotype(
     note_density = 0.0
     modal_consistency = 0.0
     activity = 0.0
+    diversity = 0.0
     try:
         if config.evaluator == "basic":
             metrics = evaluate_basic(temp_midi, target_notes=config.sim_steps)
@@ -555,6 +557,7 @@ def evaluate_genotype(
             note_density = metrics.note_density
             modal_consistency = metrics.modal_consistency
             activity = metrics.activity
+            diversity = metrics.diversity
         else:
             # Default to ambient
             metrics = evaluate_ambient(temp_midi)
@@ -563,6 +566,7 @@ def evaluate_genotype(
             note_density = metrics.note_density
             modal_consistency = metrics.modal_consistency
             activity = metrics.activity
+            # ambient evaluator doesn't have diversity yet
     except Exception as e:
         print(f"Evaluation error: {e}")
         fitness = 0.0
@@ -580,6 +584,7 @@ def evaluate_genotype(
         note_density=note_density,
         modal_consistency=modal_consistency,
         activity=activity,
+        diversity=diversity,
         midi_path=midi_filename if save_midi else None,
         output_max=output_max,
         output_min=output_min,
@@ -614,6 +619,7 @@ class GenerationStats:
     # Best individual's evaluation metrics
     best_modal_consistency: float = 0.0
     best_activity: float = 0.0
+    best_diversity: float = 0.0
     best_note_count: int = 0
     # Output statistics for debugging activity ceiling
     best_output_max: float = 0.0
@@ -897,7 +903,7 @@ def run_evolution(
         best_result = results[0]
         print(
             f"Initial best: {best_result.fitness:.4f} | "
-            f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} | "
+            f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} div:{best_result.diversity:.2f} | "
             f"notes:{best_result.note_count}"
         )
 
@@ -1150,6 +1156,7 @@ def run_evolution(
             unique_lineages=unique_lineages,
             best_modal_consistency=best_result.modal_consistency,
             best_activity=best_result.activity,
+            best_diversity=best_result.diversity,
             best_note_count=best_result.note_count,
             best_output_max=best_result.output_max,
             mean_output_max=np.mean(all_output_max),
@@ -1197,9 +1204,8 @@ def run_evolution(
         tqdm.write(
             f"Gen {current_gen:3d} | "
             f"Best: {stats.best_fitness:.4f} | "
-            f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} | "
+            f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} div:{best_result.diversity:.2f} | "
             f"notes:{best_result.note_count:3d} | "
-            f"out_max:{best_result.output_max:.2f} >thr:{stats.mean_outputs_above_threshold:.0%} | "
             f"[{survival_str}] | "
             f"age:{stats.best_age:2d} | "
             f"parents: mut={n_parents_from_mutation} rnd={n_parents_from_random} | "
@@ -1296,6 +1302,7 @@ def plot_evolution_history(
     std_fitness = [s.std_fitness for s in history]
     modal_consistency = [s.best_modal_consistency for s in history]
     activity = [s.best_activity for s in history]
+    diversity = [s.best_diversity for s in history]
 
     # Create figure with 2 rows: top row has 2 columns, bottom row spans full width
     fig = plt.figure(figsize=(14, 10))
@@ -1319,7 +1326,7 @@ def plot_evolution_history(
     ax.legend()
     ax.grid(True, alpha=0.3)
 
-    # Top right: Modality, Activity, and Fitness over generations
+    # Top right: Modality, Activity, Diversity, and Fitness over generations
     ax = fig.add_subplot(gs[0, 1])
     ax.plot(generations, best_fitness, "b-", linewidth=2, label="Fitness", alpha=0.9)
     ax.plot(
@@ -1338,6 +1345,15 @@ def plot_evolution_history(
         color="#27ae60",
         linewidth=2,
         label="Activity",
+        alpha=0.8,
+    )
+    ax.plot(
+        generations,
+        diversity,
+        "-.",
+        color="#e67e22",
+        linewidth=2,
+        label="Diversity",
         alpha=0.8,
     )
     ax.set_xlabel("Generation")
