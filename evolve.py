@@ -412,7 +412,7 @@ def _save_generation_plot(
     ax.grid(axis="y", alpha=0.3)
 
     # Save
-    plot_dir = os.path.join(output_dir, "generation_plots")
+    plot_dir = os.path.join(output_dir, "generation_graphs")
     os.makedirs(plot_dir, exist_ok=True)
     plot_path = os.path.join(plot_dir, f"gen_{gen:04d}.png")
     plt.savefig(plot_path, dpi=100)
@@ -1292,7 +1292,7 @@ def run_evolution(
             if current_best_fitness > last_saved_fitness:
                 # Create subfolders for midi and piano roll graphs
                 midi_dir = os.path.join(config.output_dir, "midi")
-                graph_dir = os.path.join(config.output_dir, "midi_graph")
+                graph_dir = os.path.join(config.output_dir, "midi_graphs")
                 os.makedirs(midi_dir, exist_ok=True)
                 os.makedirs(graph_dir, exist_ok=True)
 
