@@ -54,23 +54,26 @@ class BasicMetrics:
 
 class BasicAnalyzer:
     """
-    Simple analyzer focused on modal consistency and activity.
+    Simple analyzer focused on modal consistency, activity, and diversity.
     """
 
     def __init__(
         self,
-        modal_weight: float = 0.67,  # 2:1 ratio - modality is harder to learn
-        activity_weight: float = 0.33,
+        modal_weight: float = 1 / 3,
+        activity_weight: float = 1 / 3,
+        diversity_weight: float = 1 / 3,
         target_notes: int = 128,  # Target note count (should match sim_steps from evolve.py)
     ):
         """
         Args:
             modal_weight: Weight for modal consistency (0-1)
             activity_weight: Weight for activity (0-1)
+            diversity_weight: Weight for diversity (0-1)
             target_notes: Target note count for activity=1.0 (typically = sim_steps)
         """
         self.modal_weight = modal_weight
         self.activity_weight = activity_weight
+        self.diversity_weight = diversity_weight
         self.target_notes = target_notes
 
     def load_midi(self, midi_path: str) -> Tuple[List[dict], int, int]:
@@ -206,22 +209,22 @@ class BasicAnalyzer:
     ) -> Tuple[float, float, float]:
         """
         Compute diversity score combining pitch class entropy and n-gram repetition penalty.
-        
+
         Pitch entropy: rewards using more distinct pitch classes.
         Repetition penalty: penalizes repeated melodic patterns (n-grams).
-        
+
         Args:
             pitch_classes: List of pitch classes (0-11) in temporal order
             entropy_weight: Weight for entropy vs repetition (0.5 = equal)
-            
+
         Returns: (diversity_score, pitch_entropy, repetition_score)
             All values 0-1, where 1 = maximally diverse
         """
         from collections import Counter
-        
+
         if len(pitch_classes) < 2:
             return 0.0, 0.0, 0.0
-        
+
         # === Pitch Class Entropy ===
         # Entropy of pitch class distribution, normalized by log2(scale_size)
         # A 7-note diatonic scale has max entropy of log2(7) ≈ 2.81
@@ -229,45 +232,50 @@ class BasicAnalyzer:
         probs = counts / len(pitch_classes)
         probs = probs[probs > 0]  # Remove zeros for log
         entropy = -np.sum(probs * np.log2(probs))
-        
+
         # Normalize by ideal scale entropy (7-note scale)
         max_entropy = np.log2(7)  # ≈ 2.81 bits
         pitch_entropy = min(1.0, entropy / max_entropy)
-        
+
         # === N-gram Repetition Penalty ===
         # Check 2-grams and 3-grams, penalize heavy repetition
         # Score of 1.0 = all unique patterns, 0.0 = all same pattern
         ngram_scores = []
-        
+
         for n in [2, 3]:
             if len(pitch_classes) < n + 1:
                 continue
-            ngrams = [tuple(pitch_classes[i:i+n]) for i in range(len(pitch_classes) - n + 1)]
+            ngrams = [
+                tuple(pitch_classes[i : i + n])
+                for i in range(len(pitch_classes) - n + 1)
+            ]
             counts = Counter(ngrams)
-            
+
             # Compute repetition penalty: (max_count - 1) / (num_ngrams - 1)
             # 0 = all unique, 1 = all same pattern
             max_count = max(counts.values())
             num_ngrams = len(ngrams)
-            
+
             if num_ngrams > 1:
                 # Allow some repetition before penalty kicks in
                 allowed_repeats = 2
                 excess_repeats = max(0, max_count - allowed_repeats)
                 max_possible_excess = num_ngrams - allowed_repeats
-                
+
                 if max_possible_excess > 0:
                     # Quadratic penalty for steep punishment
                     penalty = (excess_repeats / max_possible_excess) ** 2
                     ngram_scores.append(1.0 - penalty)
                 else:
                     ngram_scores.append(1.0)
-        
+
         repetition_score = np.mean(ngram_scores) if ngram_scores else 1.0
-        
+
         # === Combined Diversity Score ===
-        diversity = entropy_weight * pitch_entropy + (1 - entropy_weight) * repetition_score
-        
+        diversity = (
+            entropy_weight * pitch_entropy + (1 - entropy_weight) * repetition_score
+        )
+
         return float(diversity), float(pitch_entropy), float(repetition_score)
 
     def analyze(self, midi_path: str) -> BasicMetrics:
@@ -303,12 +311,16 @@ class BasicAnalyzer:
         activity, note_density = self.compute_activity(
             notes, duration_ticks, ticks_per_beat
         )
-        diversity, pitch_entropy, repetition_score = self.compute_diversity(pitch_classes)
+        diversity, pitch_entropy, repetition_score = self.compute_diversity(
+            pitch_classes
+        )
 
-        # Composite: modal and activity weighted, then multiplied by diversity
-        # This forces diversity - any degenerate repetitive solution gets penalized
-        base_score = self.modal_weight * modal + self.activity_weight * activity
-        composite = base_score * diversity
+        # Composite: weighted sum of all three components
+        composite = (
+            self.modal_weight * modal
+            + self.activity_weight * activity
+            + self.diversity_weight * diversity
+        )
 
         return BasicMetrics(
             modal_consistency=modal,

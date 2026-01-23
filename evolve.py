@@ -171,8 +171,10 @@ def _save_generation_plot(
     random_fitnesses: list[float],
     offspring_modality: list[float],
     offspring_activity: list[float],
+    offspring_diversity: list[float],
     random_modality: list[float],
     random_activity: list[float],
+    random_diversity: list[float],
     gen: int,
     output_dir: str,
     best_fitness: float,
@@ -239,6 +241,7 @@ def _save_generation_plot(
         offspring_fit_med = np.median(offspring_fitnesses)
         offspring_mod_med = np.median(offspring_modality) if offspring_modality else 0
         offspring_act_med = np.median(offspring_activity) if offspring_activity else 0
+        offspring_div_med = np.median(offspring_diversity) if offspring_diversity else 0
         # Fitness - solid blue
         ax.hlines(
             offspring_fit_med,
@@ -272,11 +275,23 @@ def _save_generation_plot(
             alpha=0.8,
             zorder=3,
         )
+        # Diversity - dash-dot orange
+        ax.hlines(
+            offspring_div_med,
+            0.35,
+            0.6,
+            colors="#e67e22",
+            linestyles="-.",
+            linewidth=1.5,
+            alpha=0.8,
+            zorder=3,
+        )
 
     if n_randoms > 0:
         random_fit_med = np.median(random_fitnesses)
         random_mod_med = np.median(random_modality) if random_modality else 0
         random_act_med = np.median(random_activity) if random_activity else 0
+        random_div_med = np.median(random_diversity) if random_diversity else 0
         # Fitness - solid red
         ax.hlines(
             random_fit_med,
@@ -310,6 +325,17 @@ def _save_generation_plot(
             alpha=0.8,
             zorder=3,
         )
+        # Diversity - dash-dot orange
+        ax.hlines(
+            random_div_med,
+            0.7,
+            0.95,
+            colors="#e67e22",
+            linestyles="-.",
+            linewidth=1.5,
+            alpha=0.8,
+            zorder=3,
+        )
 
     # Legend entries for median lines
     ax.hlines(
@@ -329,6 +355,15 @@ def _save_generation_plot(
         linestyles=":",
         linewidth=1.5,
         label="Activity median",
+    )
+    ax.hlines(
+        [],
+        [],
+        [],
+        colors="#e67e22",
+        linestyles="-.",
+        linewidth=1.5,
+        label="Diversity median",
     )
 
     # Dummy scatters for legend (parents)
@@ -1092,9 +1127,11 @@ def run_evolution(
         offspring_fitnesses_for_plot = [r.fitness for r in offspring_results]
         offspring_modality_for_plot = [r.modal_consistency for r in offspring_results]
         offspring_activity_for_plot = [r.activity for r in offspring_results]
+        offspring_diversity_for_plot = [r.diversity for r in offspring_results]
         random_fitnesses_for_plot = [r.fitness for r in random_results]
         random_modality_for_plot = [r.modal_consistency for r in random_results]
         random_activity_for_plot = [r.activity for r in random_results]
+        random_diversity_for_plot = [r.diversity for r in random_results]
 
         # Combine parents + offspring + randoms
         combined_pop = population + offspring + randoms
@@ -1220,8 +1257,10 @@ def run_evolution(
             random_fitnesses=random_fitnesses_for_plot,
             offspring_modality=offspring_modality_for_plot,
             offspring_activity=offspring_activity_for_plot,
+            offspring_diversity=offspring_diversity_for_plot,
             random_modality=random_modality_for_plot,
             random_activity=random_activity_for_plot,
+            random_diversity=random_diversity_for_plot,
             gen=current_gen,
             output_dir=config.output_dir,
             best_fitness=best_ever_fitness,
