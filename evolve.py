@@ -465,6 +465,11 @@ class EvolutionConfig:
     # Evaluator: "ambient" (full) or "basic" (just modal + activity)
     evaluator: str = "basic"
 
+    # Speciation: protect diverse solutions from premature elimination
+    use_speciation: bool = False
+    num_species: int = 4  # Target number of species
+    species_distance_threshold: float = 0.02  # Genotype distance to be same species
+
     # Transient (not pickled) - recreated from encoding on load
     _midi_mapper: Optional[Callable[..., str]] = field(default=None, repr=False)
 
@@ -484,6 +489,177 @@ class EvolutionConfig:
         state = self.__dict__.copy()
         state["_midi_mapper"] = None
         return state
+
+
+# =============================================================================
+# Speciation
+# =============================================================================
+
+
+def genotype_distance(g1: NetworkGenotype, g2: NetworkGenotype) -> float:
+    """
+    Compute distance between two genotypes based on weight differences.
+
+    Uses normalized L2 distance of weight matrices.
+    Returns value in [0, 1] where 0 = identical, 1 = maximally different.
+    """
+    # Flatten all weight matrices
+    w1 = np.concatenate(
+        [
+            g1.network_weights.flatten(),
+            g1.output_weights.flatten(),
+        ]
+    )
+    w2 = np.concatenate(
+        [
+            g2.network_weights.flatten(),
+            g2.output_weights.flatten(),
+        ]
+    )
+
+    # L2 distance, normalized by sqrt of dimension
+    diff = np.linalg.norm(w1 - w2) / np.sqrt(len(w1))
+
+    # Clip to [0, 1] - values above 1 are very different
+    return min(1.0, diff)
+
+
+def assign_species(
+    population: list,
+    results: list,
+    num_species: int,
+    distance_threshold: float,
+) -> dict[int, list[tuple]]:
+    """
+    Assign individuals to species based on genotype distance.
+
+    Uses k-medoids-like approach:
+    1. Pick species representatives (highest fitness in each species)
+    2. Assign each individual to nearest representative
+    3. If too far from all representatives, start new species
+
+    Returns: dict mapping species_id -> list of (individual, result) tuples
+    """
+    if not population:
+        return {}
+
+    # Sort by fitness (descending) to pick good representatives
+    sorted_pairs = sorted(
+        zip(population, results),
+        key=lambda x: x[1].fitness,
+        reverse=True,
+    )
+
+    species: dict[int, list[tuple]] = {}
+    representatives: dict[int, NetworkGenotype] = (
+        {}
+    )  # species_id -> representative genotype
+
+    for ind, result in sorted_pairs:
+        assigned = False
+
+        # Try to assign to existing species
+        for species_id, rep_genotype in representatives.items():
+            dist = genotype_distance(ind.genotype, rep_genotype)
+            if dist < distance_threshold:
+                species[species_id].append((ind, result))
+                assigned = True
+                break
+
+        # Create new species if not assigned and under limit
+        if not assigned:
+            if len(species) < num_species:
+                new_id = len(species)
+                species[new_id] = [(ind, result)]
+                representatives[new_id] = ind.genotype
+            else:
+                # Force assign to nearest species
+                min_dist = float("inf")
+                best_species = 0
+                for species_id, rep_genotype in representatives.items():
+                    dist = genotype_distance(ind.genotype, rep_genotype)
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_species = species_id
+                species[best_species].append((ind, result))
+
+    return species
+
+
+def select_with_speciation(
+    combined_pop: list,
+    combined_results: list,
+    mu: int,
+    num_species: int,
+    distance_threshold: float,
+) -> tuple[list, list, int]:
+    """
+    Select top μ individuals with speciation.
+
+    Each species gets a quota of parent slots proportional to its mean fitness.
+    Within each species, select by fitness.
+
+    Returns: (selected_population, selected_results, num_active_species)
+    """
+    # Assign to species
+    species = assign_species(
+        combined_pop, combined_results, num_species, distance_threshold
+    )
+
+    if not species:
+        return [], [], 0
+
+    # Compute mean fitness per species
+    species_fitness = {}
+    for species_id, members in species.items():
+        fitnesses = [r.fitness for _, r in members]
+        species_fitness[species_id] = np.mean(fitnesses) if fitnesses else 0.0
+
+    # Allocate slots proportional to mean fitness (with minimum 1 per species)
+    total_fitness = sum(species_fitness.values())
+    if total_fitness == 0:
+        # Equal allocation if all zero
+        slots = {sid: max(1, mu // len(species)) for sid in species}
+    else:
+        slots = {}
+        remaining = mu
+        for species_id in species:
+            # Proportional allocation, minimum 1
+            proportion = species_fitness[species_id] / total_fitness
+            allocation = max(1, int(proportion * mu))
+            slots[species_id] = min(allocation, remaining)
+            remaining -= slots[species_id]
+
+        # Distribute remaining slots to highest fitness species
+        while remaining > 0:
+            best_species = max(species_fitness, key=species_fitness.get)
+            slots[best_species] += 1
+            remaining -= 1
+
+    # Select top individuals within each species
+    selected_pop = []
+    selected_results = []
+
+    for species_id, members in species.items():
+        # Sort by fitness within species
+        sorted_members = sorted(members, key=lambda x: x[1].fitness, reverse=True)
+        # Take allocated slots
+        for ind, result in sorted_members[: slots[species_id]]:
+            selected_pop.append(ind)
+            selected_results.append(result)
+
+    # Final sort by fitness for consistent ordering
+    sorted_pairs = sorted(
+        zip(selected_pop, selected_results),
+        key=lambda x: x[1].fitness,
+        reverse=True,
+    )
+
+    return (
+        [ind for ind, _ in sorted_pairs],
+        [r for _, r in sorted_pairs],
+        len(species),
+    )
 
 
 # =============================================================================
@@ -1153,14 +1329,24 @@ def run_evolution(
         combined_pop = population + offspring + randoms
         combined_results = results + offspring_results + random_results
 
-        # Select best μ individuals
-        sorted_pairs = sorted(
-            zip(combined_pop, combined_results),
-            key=lambda x: x[1].fitness,
-            reverse=True,
-        )
-        population = [ind for ind, r in sorted_pairs[: config.mu]]
-        results = [r for ind, r in sorted_pairs[: config.mu]]
+        # Select best μ individuals (with or without speciation)
+        num_active_species = 0
+        if config.use_speciation:
+            population, results, num_active_species = select_with_speciation(
+                combined_pop,
+                combined_results,
+                config.mu,
+                config.num_species,
+                config.species_distance_threshold,
+            )
+        else:
+            sorted_pairs = sorted(
+                zip(combined_pop, combined_results),
+                key=lambda x: x[1].fitness,
+                reverse=True,
+            )
+            population = [ind for ind, r in sorted_pairs[: config.mu]]
+            results = [r for ind, r in sorted_pairs[: config.mu]]
         fitnesses = [r.fitness for r in results]
 
         # Compute parent survival visualization: ● = old parent survived, ○ = new offspring
@@ -1254,14 +1440,16 @@ def run_evolution(
 
         # Progress output
         src_str = f" [{improvement_source}]" if improvement_source else ""
+        species_str = (
+            f" | species:{num_active_species}" if config.use_speciation else ""
+        )
         tqdm.write(
             f"Gen {current_gen:3d} | "
             f"Best: {stats.best_fitness:.4f} | "
             f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} div:{best_result.diversity:.2f} | "
             f"notes:{best_result.note_count:3d} | "
             f"[{survival_str}] | "
-            f"age:{stats.best_age:2d} | "
-            f"parents: mut={n_parents_from_mutation} rnd={n_parents_from_random} | "
+            f"age:{stats.best_age:2d}{species_str} | "
             f"wins: mut={improvements_from_mutation} rnd={improvements_from_random}{src_str}"
         )
 
@@ -1314,20 +1502,20 @@ def run_evolution(
                 os.remove(temp_midi)
             last_saved_fitness = current_best_fitness
 
-        # Save checkpoint periodically
-        if current_gen % config.save_every_n_generations == 0 or is_last_gen:
-            # Save checkpoint
-            checkpoint = Checkpoint(
-                generation=current_gen,
-                population=population,
-                results=results,
-                history=history,
-                best_ever_fitness=best_ever_fitness,
-                best_ever_individual=best_ever_individual,
-                config=config,
-            )
-            checkpoint_path = os.path.join(config.output_dir, "checkpoint.pkl")
-            checkpoint.save(checkpoint_path)
+        # # Save checkpoint periodically
+        # if current_gen % config.save_every_n_generations == 0 or is_last_gen:
+        #     # Save checkpoint
+        #     checkpoint = Checkpoint(
+        #         generation=current_gen,
+        #         population=population,
+        #         results=results,
+        #         history=history,
+        #         best_ever_fitness=best_ever_fitness,
+        #         best_ever_individual=best_ever_individual,
+        #         config=config,
+        #     )
+        #     checkpoint_path = os.path.join(config.output_dir, "checkpoint.pkl")
+        #     checkpoint.save(checkpoint_path)
 
     print("-" * 100)
     print(
@@ -1680,8 +1868,10 @@ if __name__ == "__main__":
         # Fresh run
         config = EvolutionConfig(
             mu=32,
-            num_offspring=128,
-            num_randoms=16,
+            num_offspring=160,  # 5x parents to try all mutation strategies
+            num_randoms=0,  # Randoms score zero with sparse networks
+            use_speciation=True,
+            num_species=4,
             generations=args.generations,
             random_seed=42,
             save_every_n_generations=5,
