@@ -3,7 +3,6 @@
 .vscode
 .pytest_cache
 *.pkl
-*.mid
 *.wav
 *.mp3
 *.ogg
@@ -17,3 +16,4 @@
 *.m4v
 __pycache__/
 evolve_midi/
+eval_midi/
