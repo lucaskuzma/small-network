@@ -1287,35 +1287,35 @@ def run_evolution(
         # Save best MIDI and checkpoint periodically (only if fitness improved)
         is_last_gen = current_gen == total_generations
         current_best_fitness = best_ever_fitness
+
+        # Save piano roll every generation when fitness improves
+        if current_best_fitness > last_saved_fitness:
+            graph_dir = os.path.join(config.output_dir, "midi_graphs")
+            os.makedirs(graph_dir, exist_ok=True)
+
+            filename = f"gen{current_gen:03d}_best_{current_best_fitness:.4f}"
+            graph_path = os.path.join(graph_dir, f"{filename}.png")
+
+            # Generate temp MIDI for piano roll, then delete it
+            temp_midi = f"/tmp/piano_roll_{os.getpid()}_{current_gen}.mid"
+            evaluate_genotype(
+                best_ever_individual.genotype,
+                config,
+                save_midi=True,
+                midi_filename=temp_midi,
+            )
+            save_piano_roll_png(
+                temp_midi,
+                png_path=graph_path,
+                duration_beats=config.sim_steps / 4,  # 16th notes to beats
+                tempo=config.tempo,
+            )
+            if os.path.exists(temp_midi):
+                os.remove(temp_midi)
+            last_saved_fitness = current_best_fitness
+
+        # Save checkpoint periodically
         if current_gen % config.save_every_n_generations == 0 or is_last_gen:
-            # Only save MIDI if fitness actually improved since last save
-            if current_best_fitness > last_saved_fitness:
-                # Create subfolders for midi and piano roll graphs
-                midi_dir = os.path.join(config.output_dir, "midi")
-                graph_dir = os.path.join(config.output_dir, "midi_graphs")
-                os.makedirs(midi_dir, exist_ok=True)
-                os.makedirs(graph_dir, exist_ok=True)
-
-                filename = f"gen{current_gen:03d}_best_{current_best_fitness:.4f}"
-                midi_path = os.path.join(midi_dir, f"{filename}.mid")
-                graph_path = os.path.join(graph_dir, f"{filename}.png")
-
-                evaluate_genotype(
-                    best_ever_individual.genotype,
-                    config,
-                    save_midi=True,
-                    midi_filename=midi_path,
-                )
-                # Save piano roll visualization
-                save_piano_roll_png(
-                    midi_path,
-                    png_path=graph_path,
-                    duration_beats=config.sim_steps / 4,  # 16th notes to beats
-                    tempo=config.tempo,
-                )
-                tqdm.write(f"  → Saved: {midi_path}")
-                last_saved_fitness = current_best_fitness
-
             # Save checkpoint
             checkpoint = Checkpoint(
                 generation=current_gen,
@@ -1337,34 +1337,30 @@ def run_evolution(
     # Plot successful mutation statistics
     _plot_mutation_stats(successful_mutations, config.output_dir)
 
-    # Save final best (only if improved since last periodic save)
-    if best_ever_fitness > last_saved_fitness:
-        # Create subfolders for midi and piano roll graphs
-        midi_dir = os.path.join(config.output_dir, "midi")
-        graph_dir = os.path.join(config.output_dir, "midi_graph")
-        os.makedirs(midi_dir, exist_ok=True)
-        os.makedirs(graph_dir, exist_ok=True)
+    # Save final best MIDI
+    midi_dir = os.path.join(config.output_dir, "midi")
+    graph_dir = os.path.join(config.output_dir, "midi_graphs")
+    os.makedirs(midi_dir, exist_ok=True)
+    os.makedirs(graph_dir, exist_ok=True)
 
-        filename = f"final_best_{best_ever_fitness:.4f}"
-        final_midi_path = os.path.join(midi_dir, f"{filename}.mid")
-        final_graph_path = os.path.join(graph_dir, f"{filename}.png")
+    filename = f"final_best_{best_ever_fitness:.4f}"
+    final_midi_path = os.path.join(midi_dir, f"{filename}.mid")
+    final_graph_path = os.path.join(graph_dir, f"{filename}.png")
 
-        evaluate_genotype(
-            best_ever_individual.genotype,
-            config,
-            save_midi=True,
-            midi_filename=final_midi_path,
-        )
-        # Save piano roll visualization
-        save_piano_roll_png(
-            final_midi_path,
-            png_path=final_graph_path,
-            duration_beats=config.sim_steps / 4,  # 16th notes to beats
-            tempo=config.tempo,
-        )
-        print(f"Final best saved to: {final_midi_path}")
-    else:
-        print(f"Final best unchanged since last save")
+    evaluate_genotype(
+        best_ever_individual.genotype,
+        config,
+        save_midi=True,
+        midi_filename=final_midi_path,
+    )
+    # Save piano roll visualization
+    save_piano_roll_png(
+        final_midi_path,
+        png_path=final_graph_path,
+        duration_beats=config.sim_steps / 4,  # 16th notes to beats
+        tempo=config.tempo,
+    )
+    print(f"Final best saved to: {final_midi_path}")
 
     return best_ever_individual.genotype, history
 
