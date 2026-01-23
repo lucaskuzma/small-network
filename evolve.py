@@ -635,17 +635,23 @@ def select_with_speciation(
 
     # Allocate slots proportional to mean fitness among viable species
     total_fitness = sum(viable_species.values())
-    slots = {}
-    remaining = mu
 
+    # First pass: calculate ideal allocations (minimum 1 per species)
+    raw_slots = {}
     for species_id, fitness in viable_species.items():
-        # Proportional allocation, minimum 1 for viable species
         proportion = fitness / total_fitness
-        allocation = max(1, int(proportion * mu))
-        slots[species_id] = min(allocation, remaining)
-        remaining -= slots[species_id]
+        raw_slots[species_id] = max(1, int(proportion * mu))
+
+    # Scale down if over-allocated
+    total_allocated = sum(raw_slots.values())
+    if total_allocated > mu:
+        scale = mu / total_allocated
+        slots = {sid: max(1, int(raw_slots[sid] * scale)) for sid in raw_slots}
+    else:
+        slots = raw_slots.copy()
 
     # Distribute remaining slots to highest fitness species
+    remaining = mu - sum(slots.values())
     while remaining > 0:
         best_species = max(viable_species, key=viable_species.get)
         slots[best_species] += 1
