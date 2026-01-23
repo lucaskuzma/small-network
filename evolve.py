@@ -468,7 +468,7 @@ class EvolutionConfig:
     # Speciation: protect diverse solutions from premature elimination
     use_speciation: bool = False
     num_species: int = 4  # Target number of species
-    species_distance_threshold: float = 0.02  # Genotype distance to be same species
+    species_distance_threshold: float = 0.001  # Genotype distance to be same species
 
     # Transient (not pickled) - recreated from encoding on load
     _midi_mapper: Optional[Callable[..., str]] = field(default=None, repr=False)
