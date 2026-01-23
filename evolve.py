@@ -20,6 +20,7 @@ from enum import Enum
 from network import NeuralNetwork, NetworkGenotype
 from eval_ambient import evaluate_ambient
 from eval_basic import evaluate_basic
+from utils_sonic import save_piano_roll_png
 from typing import Callable, Protocol
 
 
@@ -1299,6 +1300,12 @@ def run_evolution(
                     save_midi=True,
                     midi_filename=midi_path,
                 )
+                # Save piano roll visualization
+                save_piano_roll_png(
+                    midi_path,
+                    duration_beats=config.sim_steps / 4,  # 16th notes to beats
+                    tempo=config.tempo,
+                )
                 tqdm.write(f"  → Saved: {midi_path}")
                 last_saved_fitness = current_best_fitness
 
@@ -1333,6 +1340,12 @@ def run_evolution(
             config,
             save_midi=True,
             midi_filename=final_midi_path,
+        )
+        # Save piano roll visualization
+        save_piano_roll_png(
+            final_midi_path,
+            duration_beats=config.sim_steps / 4,  # 16th notes to beats
+            tempo=config.tempo,
         )
         print(f"Final best saved to: {final_midi_path}")
     else:

@@ -740,3 +740,115 @@ def play_midi(filename):
     while pygame.mixer.music.get_busy():
         pygame.time.Clock().tick(10)
 
+
+# =======================================================================
+# Piano Roll Visualization
+# =======================================================================
+
+
+def save_piano_roll_png(
+    midi_path: str,
+    png_path: str = None,
+    figsize: tuple = (14, 4),
+    pitch_range: tuple = (36, 96),
+    duration_beats: float = 32.0,
+    tempo: int = 120,
+):
+    """
+    Save a piano roll visualization of a MIDI file.
+    
+    Fixed extents for animation compatibility:
+    - X-axis: 0 to duration_beats (in beats)
+    - Y-axis: pitch_range[0] to pitch_range[1] (MIDI note numbers)
+    
+    Args:
+        midi_path: Path to input MIDI file
+        png_path: Path for output PNG (default: same as midi_path with .png extension)
+        figsize: Figure size in inches (width, height)
+        pitch_range: (min_pitch, max_pitch) for Y-axis (default: 36-96, C2-C7)
+        duration_beats: X-axis extent in beats (default: 32 beats)
+        tempo: Tempo in BPM for time conversion (default: 120)
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    from mido import MidiFile
+    
+    if png_path is None:
+        png_path = midi_path.rsplit(".", 1)[0] + ".png"
+    
+    # Load MIDI and extract notes
+    mid = MidiFile(midi_path)
+    ticks_per_beat = mid.ticks_per_beat
+    
+    notes = []
+    for track_idx, track in enumerate(mid.tracks):
+        current_tick = 0
+        active_notes = {}  # (pitch, channel) -> start_tick
+        
+        for msg in track:
+            current_tick += msg.time
+            
+            if msg.type == "note_on" and msg.velocity > 0:
+                key = (msg.note, msg.channel)
+                active_notes[key] = (current_tick, msg.velocity)
+            
+            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                key = (msg.note, msg.channel)
+                if key in active_notes:
+                    start_tick, velocity = active_notes[key]
+                    notes.append({
+                        "pitch": msg.note,
+                        "start_beat": start_tick / ticks_per_beat,
+                        "end_beat": current_tick / ticks_per_beat,
+                        "velocity": velocity,
+                        "track": track_idx,
+                    })
+                    del active_notes[key]
+    
+    # Create figure with fixed size
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Color by track (voice)
+    track_colors = ["#3498db", "#e74c3c", "#2ecc71", "#9b59b6", "#f39c12", "#1abc9c"]
+    
+    # Draw notes as rectangles
+    for note in notes:
+        color = track_colors[note["track"] % len(track_colors)]
+        # Velocity -> alpha (0.4 to 1.0)
+        alpha = 0.4 + 0.6 * (note["velocity"] / 127)
+        
+        rect = patches.Rectangle(
+            (note["start_beat"], note["pitch"] - 0.4),
+            note["end_beat"] - note["start_beat"],
+            0.8,
+            facecolor=color,
+            edgecolor="black",
+            linewidth=0.5,
+            alpha=alpha,
+        )
+        ax.add_patch(rect)
+    
+    # Fixed axes for animation
+    ax.set_xlim(0, duration_beats)
+    ax.set_ylim(pitch_range[0], pitch_range[1])
+    
+    # Grid lines on octaves (C notes)
+    octave_notes = [n for n in range(pitch_range[0], pitch_range[1] + 1) if n % 12 == 0]
+    ax.set_yticks(octave_notes)
+    ax.set_yticklabels([f"C{n // 12 - 1}" for n in octave_notes])
+    ax.yaxis.grid(True, alpha=0.3)
+    
+    # Beat grid
+    ax.xaxis.grid(True, alpha=0.3)
+    ax.set_xticks(range(0, int(duration_beats) + 1, 4))
+    
+    ax.set_xlabel("Beats")
+    ax.set_ylabel("Pitch")
+    ax.set_facecolor("#f8f9fa")
+    
+    # Tight layout and save
+    plt.tight_layout()
+    plt.savefig(png_path, dpi=100, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    
+    return png_path
