@@ -599,6 +599,8 @@ def select_with_speciation(
     Each species gets a quota of parent slots proportional to its mean fitness.
     Within each species, select by fitness.
 
+    Zero-fitness species get NO slots - don't waste parents on dead ends.
+
     Returns: (selected_population, selected_results, num_active_species)
     """
     # Assign to species
@@ -609,32 +611,45 @@ def select_with_speciation(
     if not species:
         return [], [], 0
 
-    # Compute mean fitness per species
+    # Compute mean fitness per species (only count non-zero members)
     species_fitness = {}
     for species_id, members in species.items():
-        fitnesses = [r.fitness for _, r in members]
+        fitnesses = [r.fitness for _, r in members if r.fitness > 0]
         species_fitness[species_id] = np.mean(fitnesses) if fitnesses else 0.0
 
-    # Allocate slots proportional to mean fitness (with minimum 1 per species)
-    total_fitness = sum(species_fitness.values())
-    if total_fitness == 0:
-        # Equal allocation if all zero
-        slots = {sid: max(1, mu // len(species)) for sid in species}
-    else:
-        slots = {}
-        remaining = mu
-        for species_id in species:
-            # Proportional allocation, minimum 1
-            proportion = species_fitness[species_id] / total_fitness
-            allocation = max(1, int(proportion * mu))
-            slots[species_id] = min(allocation, remaining)
-            remaining -= slots[species_id]
+    # Filter out zero-fitness species entirely
+    viable_species = {sid: fit for sid, fit in species_fitness.items() if fit > 0}
 
-        # Distribute remaining slots to highest fitness species
-        while remaining > 0:
-            best_species = max(species_fitness, key=species_fitness.get)
-            slots[best_species] += 1
-            remaining -= 1
+    if not viable_species:
+        # All species have zero fitness - fall back to global selection
+        sorted_pairs = sorted(
+            zip(combined_pop, combined_results),
+            key=lambda x: x[1].fitness,
+            reverse=True,
+        )
+        return (
+            [ind for ind, _ in sorted_pairs[:mu]],
+            [r for _, r in sorted_pairs[:mu]],
+            0,
+        )
+
+    # Allocate slots proportional to mean fitness among viable species
+    total_fitness = sum(viable_species.values())
+    slots = {}
+    remaining = mu
+
+    for species_id, fitness in viable_species.items():
+        # Proportional allocation, minimum 1 for viable species
+        proportion = fitness / total_fitness
+        allocation = max(1, int(proportion * mu))
+        slots[species_id] = min(allocation, remaining)
+        remaining -= slots[species_id]
+
+    # Distribute remaining slots to highest fitness species
+    while remaining > 0:
+        best_species = max(viable_species, key=viable_species.get)
+        slots[best_species] += 1
+        remaining -= 1
 
     # Select top individuals within each species
     selected_pop = []
