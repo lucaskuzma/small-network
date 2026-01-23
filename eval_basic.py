@@ -55,25 +55,20 @@ class BasicMetrics:
 class BasicAnalyzer:
     """
     Simple analyzer focused on modal consistency, activity, and diversity.
+
+    Composite score is multiplicative: modal * activity * diversity
+    This ensures all three must be satisfied - modality/diversity are
+    meaningless without sufficient activity.
     """
 
     def __init__(
         self,
-        modal_weight: float = 1 / 4,
-        activity_weight: float = 1 / 4,
-        diversity_weight: float = 1 / 2,
         target_notes: int = 128,  # Target note count (should match sim_steps from evolve.py)
     ):
         """
         Args:
-            modal_weight: Weight for modal consistency (0-1)
-            activity_weight: Weight for activity (0-1)
-            diversity_weight: Weight for diversity (0-1)
             target_notes: Target note count for activity=1.0 (typically = sim_steps)
         """
-        self.modal_weight = modal_weight
-        self.activity_weight = activity_weight
-        self.diversity_weight = diversity_weight
         self.target_notes = target_notes
 
     def load_midi(self, midi_path: str) -> Tuple[List[dict], int, int]:
@@ -315,12 +310,9 @@ class BasicAnalyzer:
             pitch_classes
         )
 
-        # Composite: weighted sum of all three components
-        composite = (
-            self.modal_weight * modal
-            + self.activity_weight * activity
-            + self.diversity_weight * diversity
-        )
+        # Composite: multiplicative - all three must be satisfied
+        # Any zero kills the score; modality/diversity meaningless without activity
+        composite = modal * activity * diversity
 
         return BasicMetrics(
             modal_consistency=modal,

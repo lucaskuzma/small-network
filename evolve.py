@@ -1683,7 +1683,7 @@ if __name__ == "__main__":
             num_offspring=100,  # All offspring from mutation (4 strategies, 25 each)
             num_randoms=0,  # Mutations proven more effective than randoms
             generations=args.generations,
-            random_seed=42,
+            random_seed=46,
             save_every_n_generations=5,
             encoding=args.encoding,
             evaluator=args.eval,
