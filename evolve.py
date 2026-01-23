@@ -592,7 +592,7 @@ def select_with_speciation(
     mu: int,
     num_species: int,
     distance_threshold: float,
-) -> tuple[list, list, int]:
+) -> tuple[list, list, int, dict]:
     """
     Select top μ individuals with speciation.
 
@@ -601,7 +601,7 @@ def select_with_speciation(
 
     Zero-fitness species get NO slots - don't waste parents on dead ends.
 
-    Returns: (selected_population, selected_results, num_active_species)
+    Returns: (selected_population, selected_results, num_active_species, species_counts)
     """
     # Assign to species
     species = assign_species(
@@ -631,6 +631,7 @@ def select_with_speciation(
             [ind for ind, _ in sorted_pairs[:mu]],
             [r for _, r in sorted_pairs[:mu]],
             0,
+            {},  # No species counts
         )
 
     # Allocate slots proportional to mean fitness among viable species
@@ -681,6 +682,7 @@ def select_with_speciation(
         [ind for ind, _ in sorted_pairs],
         [r for _, r in sorted_pairs],
         len(viable_species),  # Return count of viable species, not all species
+        slots,  # species_id -> count of parents in that species
     )
 
 
@@ -875,6 +877,9 @@ class GenerationStats:
     mean_outputs_above_threshold: float = 0.0  # across all individuals
     # Root lineage counts (how many parents descend from each original ancestor)
     lineage_counts: dict = field(default_factory=dict)  # root_id -> count in top μ
+    # Species counts (how many parents in each species, if speciation enabled)
+    species_counts: dict = field(default_factory=dict)  # species_id -> count in top μ
+    num_species: int = 0  # number of active species
 
 
 @dataclass
@@ -1353,13 +1358,16 @@ def run_evolution(
 
         # Select best μ individuals (with or without speciation)
         num_active_species = 0
+        species_counts = {}
         if config.use_speciation:
-            population, results, num_active_species = select_with_speciation(
-                combined_pop,
-                combined_results,
-                config.mu,
-                config.num_species,
-                config.species_distance_threshold,
+            population, results, num_active_species, species_counts = (
+                select_with_speciation(
+                    combined_pop,
+                    combined_results,
+                    config.mu,
+                    config.num_species,
+                    config.species_distance_threshold,
+                )
             )
         else:
             sorted_pairs = sorted(
@@ -1423,6 +1431,8 @@ def run_evolution(
             mean_output_max=np.mean(all_output_max),
             mean_outputs_above_threshold=np.mean(all_above_thresh),
             lineage_counts=lineage_counts,
+            species_counts=species_counts,
+            num_species=num_active_species,
         )
         history.append(stats)
 
@@ -1652,11 +1662,59 @@ def plot_evolution_history(
     ax.legend(loc="best")
     ax.grid(True, alpha=0.3)
 
-    # Bottom: Lineage survival (spans full width)
+    # Bottom: Species or Lineage survival (spans full width)
     ax = fig.add_subplot(gs[1, :])
 
-    if history and history[0].lineage_counts:
-        # Collect all root IDs that ever appear
+    # Check if we have species data (speciation was enabled)
+    has_species = history and any(s.species_counts for s in history)
+
+    if has_species:
+        # Show species distribution over time
+        all_species = set()
+        for s in history:
+            all_species.update(s.species_counts.keys())
+        all_species = sorted(all_species)
+
+        # Build data matrix: (num_generations, num_species)
+        species_data = np.zeros((len(history), len(all_species)))
+        for i, s in enumerate(history):
+            for j, sp in enumerate(all_species):
+                species_data[i, j] = s.species_counts.get(sp, 0)
+
+        # Generate colors for each species
+        cmap = plt.cm.get_cmap("Set2", max(len(all_species), 8))
+        colors = [cmap(i) for i in range(len(all_species))]
+
+        # Stacked area chart
+        ax.stackplot(
+            generations,
+            species_data.T,
+            colors=colors,
+            alpha=0.8,
+            labels=[f"Species {sp}" for sp in all_species],
+        )
+
+        ax.set_xlabel("Generation")
+        ax.set_ylabel("Parents per Species")
+        ax.set_title("Species Distribution Over Generations")
+        ax.set_xlim(generations[0], generations[-1])
+        ax.set_ylim(0, species_data.sum(axis=1).max())
+        ax.legend(loc="upper left", fontsize=8)
+
+        # Note how many species at end
+        final_species = history[-1].num_species if history else 0
+        ax.text(
+            0.98,
+            0.98,
+            f"{final_species} active species",
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+            fontsize=10,
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        )
+    elif history and history[0].lineage_counts:
+        # Fall back to lineage chart if no species data
         all_roots = set()
         for s in history:
             all_roots.update(s.lineage_counts.keys())
@@ -1701,8 +1759,8 @@ def plot_evolution_history(
             bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
         )
     else:
-        ax.text(0.5, 0.5, "No lineage data", ha="center", va="center")
-        ax.set_title("Lineage Survival")
+        ax.text(0.5, 0.5, "No lineage/species data", ha="center", va="center")
+        ax.set_title("Population Diversity")
 
     plt.tight_layout()
 
