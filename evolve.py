@@ -1679,11 +1679,11 @@ if __name__ == "__main__":
 
         # Fresh run
         config = EvolutionConfig(
-            mu=20,
-            num_offspring=100,  # All offspring from mutation (4 strategies, 25 each)
-            num_randoms=0,  # Mutations proven more effective than randoms
+            mu=32,
+            num_offspring=128,
+            num_randoms=16,
             generations=args.generations,
-            random_seed=46,
+            random_seed=42,
             save_every_n_generations=5,
             encoding=args.encoding,
             evaluator=args.eval,
