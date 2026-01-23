@@ -199,21 +199,13 @@ class BasicAnalyzer:
 
         return float(score), note_density
 
-    def compute_diversity(
+    def _compute_voice_diversity(
         self, pitch_classes: List[int], entropy_weight: float = 0.5
     ) -> Tuple[float, float, float]:
         """
-        Compute diversity score combining pitch class entropy and n-gram repetition penalty.
-
-        Pitch entropy: rewards using more distinct pitch classes.
-        Repetition penalty: penalizes repeated melodic patterns (n-grams).
-
-        Args:
-            pitch_classes: List of pitch classes (0-11) in temporal order
-            entropy_weight: Weight for entropy vs repetition (0.5 = equal)
+        Compute diversity for a single voice.
 
         Returns: (diversity_score, pitch_entropy, repetition_score)
-            All values 0-1, where 1 = maximally diverse
         """
         from collections import Counter
 
@@ -273,6 +265,65 @@ class BasicAnalyzer:
 
         return float(diversity), float(pitch_entropy), float(repetition_score)
 
+    def compute_diversity(
+        self, notes: List[dict], entropy_weight: float = 0.5
+    ) -> Tuple[float, float, float]:
+        """
+        Compute diversity score PER VOICE, then aggregate.
+
+        Each voice must individually be diverse - a voice repeating one note
+        will tank the score even if other voices play different notes.
+
+        Args:
+            notes: List of note dicts with 'pitch' and 'track' fields
+            entropy_weight: Weight for entropy vs repetition (0.5 = equal)
+
+        Returns: (diversity_score, pitch_entropy, repetition_score)
+            All values 0-1, where 1 = maximally diverse
+        """
+        if len(notes) < 2:
+            return 0.0, 0.0, 0.0
+
+        # Group notes by track (voice)
+        from collections import defaultdict
+
+        notes_by_track = defaultdict(list)
+        for note in notes:
+            notes_by_track[note["track"]].append(note)
+
+        # Compute diversity per voice
+        voice_diversities = []
+        voice_entropies = []
+        voice_repetitions = []
+
+        for track_notes in notes_by_track.values():
+            if len(track_notes) < 2:
+                # Voice with 0-1 notes gets zero diversity
+                voice_diversities.append(0.0)
+                voice_entropies.append(0.0)
+                voice_repetitions.append(0.0)
+                continue
+
+            # Sort by start time within voice
+            track_notes = sorted(track_notes, key=lambda x: x["start_tick"])
+            pitch_classes = [n["pitch"] % 12 for n in track_notes]
+
+            div, ent, rep = self._compute_voice_diversity(pitch_classes, entropy_weight)
+            voice_diversities.append(div)
+            voice_entropies.append(ent)
+            voice_repetitions.append(rep)
+
+        if not voice_diversities:
+            return 0.0, 0.0, 0.0
+
+        # Aggregate: use MINIMUM to force ALL voices to be diverse
+        # (mean would allow one repetitive voice if others compensate)
+        diversity = float(np.min(voice_diversities))
+        pitch_entropy = float(np.min(voice_entropies))
+        repetition_score = float(np.min(voice_repetitions))
+
+        return diversity, pitch_entropy, repetition_score
+
     def analyze(self, midi_path: str) -> BasicMetrics:
         """
         Analyze a MIDI file and return basic metrics.
@@ -306,9 +357,8 @@ class BasicAnalyzer:
         activity, note_density = self.compute_activity(
             notes, duration_ticks, ticks_per_beat
         )
-        diversity, pitch_entropy, repetition_score = self.compute_diversity(
-            pitch_classes
-        )
+        # Per-voice diversity - each voice must individually be diverse
+        diversity, pitch_entropy, repetition_score = self.compute_diversity(notes)
 
         # Composite: multiplicative - all three must be satisfied
         # Any zero kills the score; modality/diversity meaningless without activity
