@@ -7,6 +7,9 @@ import numpy as np
 # =============================================================================
 # Default hyperparameters
 # =============================================================================
+DEFAULT_NUM_NEURONS = 1024
+DEFAULT_NUM_READOUTS = 4
+DEFAULT_N_OUTPUTS_PER_READOUT = 12
 DEFAULT_ACTIVATION_LEAK = 0.98
 DEFAULT_REFRACTION_LEAK = 0.75
 DEFAULT_WEIGHT_THRESHOLD = 0.05
@@ -20,9 +23,9 @@ DEFAULT_REFRACTION_VARIATION = 30
 
 @dataclass
 class NeuralNetworkState:
-    num_neurons: int = 16
-    num_readouts: int = 1  # Number of readout voices
-    n_outputs_per_readout: int = 12  # Chromatic scale per readout
+    num_neurons: int = DEFAULT_NUM_NEURONS
+    num_readouts: int = DEFAULT_NUM_READOUTS
+    n_outputs_per_readout: int = DEFAULT_N_OUTPUTS_PER_READOUT
     num_outputs: int = field(init=False)  # Calculated from readouts
     network_weights: np.ndarray = field(init=False)
     thresholds: np.ndarray = field(init=False)
@@ -97,16 +100,9 @@ class NetworkGenotype:
     @classmethod
     def random(
         cls,
-        num_neurons: int = 1024,
-        num_readouts: int = 4,
-        n_outputs_per_readout: int = 12,
-        network_sparsity: float = DEFAULT_NETWORK_SPARSITY,
-        network_weight_scale: float = DEFAULT_NETWORK_WEIGHT_SCALE,
-        output_sparsity: float = DEFAULT_OUTPUT_SPARSITY,
-        output_weight_scale: float = DEFAULT_OUTPUT_WEIGHT_SCALE,
-        refraction_period: int = DEFAULT_REFRACTION_PERIOD,
-        refraction_leak: float = DEFAULT_REFRACTION_LEAK,
-        refraction_variation: int = DEFAULT_REFRACTION_VARIATION,
+        num_neurons: int = DEFAULT_NUM_NEURONS,
+        num_readouts: int = DEFAULT_NUM_READOUTS,
+        n_outputs_per_readout: int = DEFAULT_N_OUTPUTS_PER_READOUT,
     ) -> "NetworkGenotype":
         """Create a random genotype."""
         net = NeuralNetwork(
@@ -114,14 +110,18 @@ class NetworkGenotype:
             num_readouts=num_readouts,
             n_outputs_per_readout=n_outputs_per_readout,
         )
-        net.randomize_weights(sparsity=network_sparsity, scale=network_weight_scale)
+        net.randomize_weights(
+            sparsity=DEFAULT_NETWORK_SPARSITY, scale=DEFAULT_NETWORK_WEIGHT_SCALE
+        )
         net.randomize_output_weights(
-            sparsity=output_sparsity, scale=output_weight_scale
+            sparsity=DEFAULT_OUTPUT_SPARSITY, scale=DEFAULT_OUTPUT_WEIGHT_SCALE
         )
         net.randomize_thresholds()
         net.set_diagonal_weights(0)
         net.enable_refraction_decay(
-            refraction_period, refraction_leak, refraction_variation
+            DEFAULT_REFRACTION_PERIOD,
+            DEFAULT_REFRACTION_LEAK,
+            DEFAULT_REFRACTION_VARIATION,
         )
 
         return cls.from_network(net)
@@ -139,12 +139,7 @@ class NetworkGenotype:
             refraction_period=net.state.refraction_period.copy(),
         )
 
-    def to_network(
-        self,
-        activation_leak: float = DEFAULT_ACTIVATION_LEAK,
-        refraction_leak: float = DEFAULT_REFRACTION_LEAK,
-        weight_threshold: float = DEFAULT_WEIGHT_THRESHOLD,
-    ) -> "NeuralNetwork":
+    def to_network(self) -> "NeuralNetwork":
         """Create a NeuralNetwork from this genotype."""
         net = NeuralNetwork(
             num_neurons=self.num_neurons,
@@ -158,12 +153,12 @@ class NetworkGenotype:
         net.state.thresholds_current = self.thresholds.copy()
         net.state.refraction_period = self.refraction_period.copy()
 
-        # Configure hyperparameters (don't overwrite refraction_period from genotype)
+        # Configure simulation physics
         net.state.use_activation_leak = True
-        net.state.activation_leak = activation_leak
+        net.state.activation_leak = DEFAULT_ACTIVATION_LEAK
         net.state.use_refraction_decay = True
-        net.state.refraction_leak = refraction_leak
-        net.state.weight_threshold = weight_threshold
+        net.state.refraction_leak = DEFAULT_REFRACTION_LEAK
+        net.state.weight_threshold = DEFAULT_WEIGHT_THRESHOLD
 
         return net
 
@@ -270,10 +265,10 @@ class NetworkGenotype:
 class NeuralNetwork:
     def __init__(
         self,
-        num_neurons: int = 64,
+        num_neurons: int = DEFAULT_NUM_NEURONS,
         num_outputs: Optional[int] = None,
-        num_readouts: int = 1,
-        n_outputs_per_readout: int = 12,
+        num_readouts: int = DEFAULT_NUM_READOUTS,
+        n_outputs_per_readout: int = DEFAULT_N_OUTPUTS_PER_READOUT,
         initial_state: Optional[NeuralNetworkState] = None,
     ):
         if initial_state is None:

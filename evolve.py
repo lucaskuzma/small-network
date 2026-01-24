@@ -498,8 +498,21 @@ class EvolutionConfig:
 
 def save_params_txt(config: EvolutionConfig, output_path: str) -> None:
     """Save all hyperparameters to a text file for reproducibility."""
-    import inspect
     from datetime import datetime
+    from network import (
+        DEFAULT_NUM_NEURONS,
+        DEFAULT_NUM_READOUTS,
+        DEFAULT_N_OUTPUTS_PER_READOUT,
+        DEFAULT_ACTIVATION_LEAK,
+        DEFAULT_REFRACTION_LEAK,
+        DEFAULT_WEIGHT_THRESHOLD,
+        DEFAULT_NETWORK_SPARSITY,
+        DEFAULT_NETWORK_WEIGHT_SCALE,
+        DEFAULT_OUTPUT_SPARSITY,
+        DEFAULT_OUTPUT_WEIGHT_SCALE,
+        DEFAULT_REFRACTION_PERIOD,
+        DEFAULT_REFRACTION_VARIATION,
+    )
 
     lines = [
         f"# Evolution Run Parameters",
@@ -534,37 +547,23 @@ def save_params_txt(config: EvolutionConfig, output_path: str) -> None:
         f"species_distance_threshold = {config.species_distance_threshold}",
         f"",
         f"random_seed = {config.random_seed}",
+        f"",
+        f"# === Network Defaults ===",
+        f"num_neurons = {DEFAULT_NUM_NEURONS}",
+        f"num_readouts = {DEFAULT_NUM_READOUTS}",
+        f"n_outputs_per_readout = {DEFAULT_N_OUTPUTS_PER_READOUT}",
+        f"network_sparsity = {DEFAULT_NETWORK_SPARSITY}",
+        f"network_weight_scale = {DEFAULT_NETWORK_WEIGHT_SCALE}",
+        f"output_sparsity = {DEFAULT_OUTPUT_SPARSITY}",
+        f"output_weight_scale = {DEFAULT_OUTPUT_WEIGHT_SCALE}",
+        f"refraction_period = {DEFAULT_REFRACTION_PERIOD}",
+        f"refraction_variation = {DEFAULT_REFRACTION_VARIATION}",
+        f"",
+        f"# === Simulation Physics ===",
+        f"activation_leak = {DEFAULT_ACTIVATION_LEAK}",
+        f"refraction_leak = {DEFAULT_REFRACTION_LEAK}",
+        f"weight_threshold = {DEFAULT_WEIGHT_THRESHOLD}",
     ]
-
-    # NetworkGenotype.random() parameters
-    try:
-        sig = inspect.signature(NetworkGenotype.random)
-        lines.extend([f"", f"# === Network Init (NetworkGenotype.random) ==="])
-        for k, v in sig.parameters.items():
-            if v.default is not inspect.Parameter.empty:
-                lines.append(f"{k} = {v.default}")
-    except Exception:
-        pass
-
-    # NetworkGenotype.to_network() parameters
-    try:
-        sig = inspect.signature(NetworkGenotype.to_network)
-        lines.extend([f"", f"# === Simulation Physics (to_network) ==="])
-        for k, v in sig.parameters.items():
-            if v.default is not inspect.Parameter.empty:
-                lines.append(f"{k} = {v.default}")
-    except Exception:
-        pass
-
-    # NetworkGenotype.mutate() parameters
-    try:
-        sig = inspect.signature(NetworkGenotype.mutate)
-        lines.extend([f"", f"# === Mutate defaults ==="])
-        for k, v in sig.parameters.items():
-            if v.default is not inspect.Parameter.empty:
-                lines.append(f"{k} = {v.default}")
-    except Exception:
-        pass
 
     with open(output_path, "w") as f:
         f.write("\n".join(lines))
