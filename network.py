@@ -4,6 +4,19 @@ from typing import Optional
 from dataclasses import dataclass, field
 import numpy as np
 
+# =============================================================================
+# Default hyperparameters
+# =============================================================================
+DEFAULT_ACTIVATION_LEAK = 0.98
+DEFAULT_REFRACTION_LEAK = 0.75
+DEFAULT_WEIGHT_THRESHOLD = 0.05
+DEFAULT_NETWORK_SPARSITY = 0.05
+DEFAULT_NETWORK_WEIGHT_SCALE = 0.4
+DEFAULT_OUTPUT_SPARSITY = 0.025
+DEFAULT_OUTPUT_WEIGHT_SCALE = 0.2
+DEFAULT_REFRACTION_PERIOD = 4
+DEFAULT_REFRACTION_VARIATION = 30
+
 
 @dataclass
 class NeuralNetworkState:
@@ -24,8 +37,8 @@ class NeuralNetworkState:
     refraction_period: np.ndarray = field(init=False)
 
     use_activation_leak: bool = False
-    activation_leak: float = 0.95
-    refraction_leak: float = 0.4
+    activation_leak: float = DEFAULT_ACTIVATION_LEAK
+    refraction_leak: float = DEFAULT_REFRACTION_LEAK
     use_refraction_decay: bool = False
     use_tanh_activation: bool = False
 
@@ -84,24 +97,33 @@ class NetworkGenotype:
     @classmethod
     def random(
         cls,
-        num_neurons: int = 256,
+        num_neurons: int = 1024,
         num_readouts: int = 4,
         n_outputs_per_readout: int = 12,
+        network_sparsity: float = DEFAULT_NETWORK_SPARSITY,
+        network_weight_scale: float = DEFAULT_NETWORK_WEIGHT_SCALE,
+        output_sparsity: float = DEFAULT_OUTPUT_SPARSITY,
+        output_weight_scale: float = DEFAULT_OUTPUT_WEIGHT_SCALE,
+        refraction_period: int = DEFAULT_REFRACTION_PERIOD,
+        refraction_leak: float = DEFAULT_REFRACTION_LEAK,
+        refraction_variation: int = DEFAULT_REFRACTION_VARIATION,
     ) -> "NetworkGenotype":
-        """Create a random genotype using the same setup as exp_outputs.py."""
-        # Create network and use existing methods (same as exp_outputs.py)
+        """Create a random genotype."""
         net = NeuralNetwork(
             num_neurons=num_neurons,
             num_readouts=num_readouts,
             n_outputs_per_readout=n_outputs_per_readout,
         )
-        net.randomize_weights(sparsity=0.025, scale=0.4)
-        net.randomize_output_weights(sparsity=0.025, scale=0.2)
+        net.randomize_weights(sparsity=network_sparsity, scale=network_weight_scale)
+        net.randomize_output_weights(
+            sparsity=output_sparsity, scale=output_weight_scale
+        )
         net.randomize_thresholds()
         net.set_diagonal_weights(0)
-        net.enable_refraction_decay(2, 0.75, 32)
+        net.enable_refraction_decay(
+            refraction_period, refraction_leak, refraction_variation
+        )
 
-        # Extract genotype from the configured network
         return cls.from_network(net)
 
     @classmethod
@@ -119,17 +141,11 @@ class NetworkGenotype:
 
     def to_network(
         self,
-        activation_leak: float = 0.98,
-        refraction_leak: float = 0.75,
-        weight_threshold: float = 0.05,
+        activation_leak: float = DEFAULT_ACTIVATION_LEAK,
+        refraction_leak: float = DEFAULT_REFRACTION_LEAK,
+        weight_threshold: float = DEFAULT_WEIGHT_THRESHOLD,
     ) -> "NeuralNetwork":
-        """Create a NeuralNetwork from this genotype.
-
-        Args:
-            activation_leak: Leak factor for activations (0-1). Default from exp_outputs.py.
-            refraction_leak: Leak factor during refractory period (0-1). Default from exp_outputs.py.
-            weight_threshold: Minimum |weight| to have effect (0 = disabled). Default 0.05.
-        """
+        """Create a NeuralNetwork from this genotype."""
         net = NeuralNetwork(
             num_neurons=self.num_neurons,
             num_readouts=self.num_readouts,
@@ -441,7 +457,7 @@ class NeuralNetwork:
         self.state.firing = np.zeros(self.state.num_neurons, dtype=bool)
         self.state.outputs = np.zeros(self.state.num_outputs)
 
-    def enable_activation_leak(self, leak_factor: float = 0.95):
+    def enable_activation_leak(self, leak_factor: float = DEFAULT_ACTIVATION_LEAK):
         self.state.use_activation_leak = True
         self.state.activation_leak = np.clip(leak_factor, 0, 1)
 
@@ -454,9 +470,9 @@ class NeuralNetwork:
 
     def enable_refraction_decay(
         self,
-        refraction_period: int = 3,
-        refraction_leak: float = 0.4,
-        refraction_variation: int = 0,
+        refraction_period: int = DEFAULT_REFRACTION_PERIOD,
+        refraction_leak: float = DEFAULT_REFRACTION_LEAK,
+        refraction_variation: int = DEFAULT_REFRACTION_VARIATION,
     ):
         self.state.refraction_leak = np.clip(refraction_leak, 0, 1)
         self.state.use_refraction_decay = True

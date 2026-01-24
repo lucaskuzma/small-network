@@ -492,6 +492,87 @@ class EvolutionConfig:
 
 
 # =============================================================================
+# Parameter Saving
+# =============================================================================
+
+
+def save_params_txt(config: EvolutionConfig, output_path: str) -> None:
+    """Save all hyperparameters to a text file for reproducibility."""
+    import inspect
+    from datetime import datetime
+
+    lines = [
+        f"# Evolution Run Parameters",
+        f"# Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"",
+        f"# === Evolution Config ===",
+        f"mu = {config.mu}",
+        f"num_offspring = {config.num_offspring}",
+        f"num_randoms = {config.num_randoms}",
+        f"generations = {config.generations}",
+        f"",
+        f"# === Simulation ===",
+        f"sim_steps = {config.sim_steps}",
+        f"tempo = {config.tempo}",
+        f"encoding = {config.encoding}",
+        f"evaluator = {config.evaluator}",
+        f"",
+        f"# === Mutation (from config) ===",
+        f"weight_mutation_rate = {config.weight_mutation_rate}",
+        f"weight_mutation_scale = {config.weight_mutation_scale}",
+        f"threshold_mutation_rate = {config.threshold_mutation_rate}",
+        f"threshold_mutation_scale = {config.threshold_mutation_scale}",
+        f"refraction_mutation_rate = {config.refraction_mutation_rate}",
+        f"",
+        f"# === Annealing ===",
+        f"anneal_factor = {config.anneal_factor}",
+        f"anneal_max_multiplier = {config.anneal_max_multiplier}",
+        f"",
+        f"# === Speciation ===",
+        f"use_speciation = {config.use_speciation}",
+        f"num_species = {config.num_species}",
+        f"species_distance_threshold = {config.species_distance_threshold}",
+        f"",
+        f"random_seed = {config.random_seed}",
+    ]
+
+    # NetworkGenotype.random() parameters
+    try:
+        sig = inspect.signature(NetworkGenotype.random)
+        lines.extend([f"", f"# === Network Init (NetworkGenotype.random) ==="])
+        for k, v in sig.parameters.items():
+            if v.default is not inspect.Parameter.empty:
+                lines.append(f"{k} = {v.default}")
+    except Exception:
+        pass
+
+    # NetworkGenotype.to_network() parameters
+    try:
+        sig = inspect.signature(NetworkGenotype.to_network)
+        lines.extend([f"", f"# === Simulation Physics (to_network) ==="])
+        for k, v in sig.parameters.items():
+            if v.default is not inspect.Parameter.empty:
+                lines.append(f"{k} = {v.default}")
+    except Exception:
+        pass
+
+    # NetworkGenotype.mutate() parameters
+    try:
+        sig = inspect.signature(NetworkGenotype.mutate)
+        lines.extend([f"", f"# === Mutate defaults ==="])
+        for k, v in sig.parameters.items():
+            if v.default is not inspect.Parameter.empty:
+                lines.append(f"{k} = {v.default}")
+    except Exception:
+        pass
+
+    with open(output_path, "w") as f:
+        f.write("\n".join(lines))
+
+    print(f"  Parameters saved to: {output_path}")
+
+
+# =============================================================================
 # Speciation
 # =============================================================================
 
@@ -1125,6 +1206,10 @@ def run_evolution(
     """
     # Create output directory
     os.makedirs(config.output_dir, exist_ok=True)
+
+    # Save all hyperparameters
+    params_path = os.path.join(config.output_dir, "params.txt")
+    save_params_txt(config, params_path)
 
     # Resume from checkpoint or start fresh
     if resume_from:
