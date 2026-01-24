@@ -23,6 +23,10 @@ from eval_basic import evaluate_basic
 from utils_sonic import save_piano_roll_png
 from typing import Callable, Protocol
 
+# Audio support (lazy imports in functions to avoid import errors if not used)
+# from eval_audio import evaluate_audio
+# from utils_audio import synthesize_oscillators_vectorized, save_wav, save_waveform_plot
+
 
 class AnnealStrategy(Enum):
     """Strategy for annealing mutation parameters based on parent age."""
@@ -466,7 +470,7 @@ class EvolutionConfig:
     evaluator: str = "basic"
 
     # Speciation: protect diverse solutions from premature elimination
-    use_speciation: bool = True
+    use_speciation: bool = False
     num_species: int = 4  # Target number of species
     species_distance_threshold: float = 0.001  # Genotype distance to be same species
 
@@ -807,9 +811,9 @@ class EvalResult:
     activity_trend: float  # ratio of 2nd/1st half firing (used for culling)
     note_count: int = 0  # number of MIDI notes generated
     note_density: float = 0.0  # notes per beat
-    modal_consistency: float = 0.0  # 0-1, how well notes fit a scale
-    activity: float = 0.0  # 0-1, based on note density
-    diversity: float = 0.0  # 0-1, pitch variety + anti-repetition
+    modal_consistency: float = 0.0  # 0-1, how well notes fit a scale (or consonance for audio)
+    activity: float = 0.0  # 0-1, based on note density (or amplitude activity for audio)
+    diversity: float = 0.0  # 0-1, pitch variety + anti-repetition (or independence for audio)
     midi_path: Optional[str] = None
     # Output statistics for debugging activity ceiling
     output_max: float = 0.0  # max output value across all timesteps
@@ -817,6 +821,8 @@ class EvalResult:
     outputs_above_threshold: float = (
         0.0  # fraction of (timestep, voice) pairs above 0.3
     )
+    # Audio-specific
+    sounding_fraction: float = 0.0  # fraction of time with 2+ voices sounding
 
 
 def evaluate_genotype(
@@ -887,49 +893,82 @@ def evaluate_genotype(
             outputs_above_threshold=outputs_above_threshold,
         )
 
-    # Convert outputs to MIDI using mapper (auto-created from config.encoding)
-    # Save MIDI (suppress verbose output)
-    if save_midi and midi_filename:
-        os.makedirs(os.path.dirname(midi_filename), exist_ok=True)
-        with suppress_stdout():
-            config.midi_mapper(output_history, midi_filename, config.tempo)
-
-    # Create temporary MIDI for evaluation (suppress verbose output)
-    temp_midi = f"/tmp/evolve_eval_{os.getpid()}_{id(genotype)}.mid"
-    with suppress_stdout():
-        config.midi_mapper(output_history, temp_midi, config.tempo)
-
-    # Evaluate fitness using chosen evaluator
+    # Evaluate fitness - different paths for MIDI vs Audio
     note_count = 0
     note_density = 0.0
     modal_consistency = 0.0
     activity = 0.0
     diversity = 0.0
-    try:
-        if config.evaluator == "basic":
-            metrics = evaluate_basic(temp_midi, target_notes=config.sim_steps)
+    sounding_fraction = 0.0
+
+    if config.encoding == "audio":
+        # === AUDIO MODE: Direct synthesis and evaluation ===
+        from eval_audio import evaluate_audio as eval_audio_fn
+        from utils_audio import synthesize_oscillators_vectorized, save_wav
+
+        try:
+            # Evaluate directly on output_history (no MIDI intermediate)
+            metrics = eval_audio_fn(output_history)
             fitness = metrics.composite_score
-            note_count = metrics.note_count
-            note_density = metrics.note_density
-            modal_consistency = metrics.modal_consistency
+            # Map audio metrics to common fields for logging
+            modal_consistency = metrics.consonance  # consonance ~ modality
             activity = metrics.activity
-            diversity = metrics.diversity
-        else:
-            # Default to ambient
-            metrics = evaluate_ambient(temp_midi)
-            fitness = metrics.composite_score
-            note_count = metrics.note_count
-            note_density = metrics.note_density
-            modal_consistency = metrics.modal_consistency
-            activity = metrics.activity
-            # ambient evaluator doesn't have diversity yet
-    except Exception as e:
-        print(f"Evaluation error: {e}")
-        fitness = 0.0
-    finally:
-        # Clean up temp file
-        if os.path.exists(temp_midi):
-            os.remove(temp_midi)
+            diversity = metrics.independence  # independence ~ diversity
+            sounding_fraction = metrics.sounding_fraction
+
+            # Save WAV if requested
+            if save_midi and midi_filename:
+                # Replace .mid extension with .wav
+                wav_filename = midi_filename.replace(".mid", ".wav")
+                os.makedirs(os.path.dirname(wav_filename), exist_ok=True)
+                audio, _ = synthesize_oscillators_vectorized(
+                    output_history,
+                    sample_rate=config.tempo,  # tempo = sample_rate for audio
+                )
+                save_wav(audio, wav_filename, sample_rate=config.tempo)
+
+        except Exception as e:
+            print(f"Audio evaluation error: {e}")
+            fitness = 0.0
+
+    else:
+        # === MIDI MODE: Convert to MIDI and evaluate ===
+        # Save MIDI (suppress verbose output)
+        if save_midi and midi_filename:
+            os.makedirs(os.path.dirname(midi_filename), exist_ok=True)
+            with suppress_stdout():
+                config.midi_mapper(output_history, midi_filename, config.tempo)
+
+        # Create temporary MIDI for evaluation (suppress verbose output)
+        temp_midi = f"/tmp/evolve_eval_{os.getpid()}_{id(genotype)}.mid"
+        with suppress_stdout():
+            config.midi_mapper(output_history, temp_midi, config.tempo)
+
+        try:
+            if config.evaluator == "basic":
+                metrics = evaluate_basic(temp_midi, target_notes=config.sim_steps)
+                fitness = metrics.composite_score
+                note_count = metrics.note_count
+                note_density = metrics.note_density
+                modal_consistency = metrics.modal_consistency
+                activity = metrics.activity
+                diversity = metrics.diversity
+            else:
+                # Default to ambient
+                metrics = evaluate_ambient(temp_midi)
+                fitness = metrics.composite_score
+                note_count = metrics.note_count
+                note_density = metrics.note_density
+                modal_consistency = metrics.modal_consistency
+                activity = metrics.activity
+                # ambient evaluator doesn't have diversity yet
+        except Exception as e:
+            print(f"Evaluation error: {e}")
+            fitness = 0.0
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_midi):
+                os.remove(temp_midi)
 
     return EvalResult(
         fitness=fitness,
@@ -945,6 +984,7 @@ def evaluate_genotype(
         output_max=output_max,
         output_min=output_min,
         outputs_above_threshold=outputs_above_threshold,
+        sounding_fraction=sounding_fraction,
     )
 
 
@@ -977,6 +1017,7 @@ class GenerationStats:
     best_activity: float = 0.0
     best_diversity: float = 0.0
     best_note_count: int = 0
+    best_sounding_fraction: float = 0.0  # Audio mode: fraction of time with sound
     # Output statistics for debugging activity ceiling
     best_output_max: float = 0.0
     mean_output_max: float = 0.0
@@ -1264,11 +1305,18 @@ def run_evolution(
 
         # Show initial population stats
         best_result = results[0]
-        print(
-            f"Initial best: {best_result.fitness:.4f} | "
-            f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} div:{best_result.diversity:.2f} | "
-            f"notes:{best_result.note_count}"
-        )
+        if config.encoding == "audio":
+            print(
+                f"Initial best: {best_result.fitness:.4f} | "
+                f"cons:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} indep:{best_result.diversity:.2f} | "
+                f"sounding:{best_result.sounding_fraction:.1%}"
+            )
+        else:
+            print(
+                f"Initial best: {best_result.fitness:.4f} | "
+                f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} div:{best_result.diversity:.2f} | "
+                f"notes:{best_result.note_count}"
+            )
 
         # Track history
         history = []
@@ -1537,6 +1585,7 @@ def run_evolution(
             best_activity=best_result.activity,
             best_diversity=best_result.diversity,
             best_note_count=best_result.note_count,
+            best_sounding_fraction=best_result.sounding_fraction,
             best_output_max=best_result.output_max,
             mean_output_max=np.mean(all_output_max),
             mean_outputs_above_threshold=np.mean(all_above_thresh),
@@ -1585,15 +1634,26 @@ def run_evolution(
         species_str = (
             f" | species:{num_active_species}" if config.use_speciation else ""
         )
-        tqdm.write(
-            f"Gen {current_gen:3d} | "
-            f"Best: {stats.best_fitness:.4f} | "
-            f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} div:{best_result.diversity:.2f} | "
-            f"notes:{best_result.note_count:3d} | "
-            f"[{survival_str}] | "
-            f"age:{stats.best_age:2d}{species_str} | "
-            f"wins: mut={improvements_from_mutation} rnd={improvements_from_random}{src_str}"
-        )
+        if config.encoding == "audio":
+            tqdm.write(
+                f"Gen {current_gen:3d} | "
+                f"Best: {stats.best_fitness:.4f} | "
+                f"cons:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} indep:{best_result.diversity:.2f} | "
+                f"sounding:{best_result.sounding_fraction:.1%} | "
+                f"[{survival_str}] | "
+                f"age:{stats.best_age:2d}{species_str} | "
+                f"wins: mut={improvements_from_mutation} rnd={improvements_from_random}{src_str}"
+            )
+        else:
+            tqdm.write(
+                f"Gen {current_gen:3d} | "
+                f"Best: {stats.best_fitness:.4f} | "
+                f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} div:{best_result.diversity:.2f} | "
+                f"notes:{best_result.note_count:3d} | "
+                f"[{survival_str}] | "
+                f"age:{stats.best_age:2d}{species_str} | "
+                f"wins: mut={improvements_from_mutation} rnd={improvements_from_random}{src_str}"
+            )
 
         # Save generation plot (for animation)
         _save_generation_plot(
@@ -1618,30 +1678,63 @@ def run_evolution(
         is_last_gen = current_gen == total_generations
         current_best_fitness = best_ever_fitness
 
-        # Save piano roll every generation when fitness improves
+        # Save visualization every generation when fitness improves
         if current_best_fitness > last_saved_fitness:
-            graph_dir = os.path.join(config.output_dir, "midi_graphs")
+            graph_dir = os.path.join(config.output_dir, "output_graphs")
             os.makedirs(graph_dir, exist_ok=True)
 
             filename = f"gen{current_gen:03d}_best_{current_best_fitness:.4f}"
             graph_path = os.path.join(graph_dir, f"{filename}.png")
 
-            # Generate temp MIDI for piano roll, then delete it
-            temp_midi = f"/tmp/piano_roll_{os.getpid()}_{current_gen}.mid"
-            evaluate_genotype(
-                best_ever_individual.genotype,
-                config,
-                save_midi=True,
-                midi_filename=temp_midi,
-            )
-            save_piano_roll_png(
-                temp_midi,
-                png_path=graph_path,
-                duration_beats=config.sim_steps / 4,  # 16th notes to beats
-                tempo=config.tempo,
-            )
-            if os.path.exists(temp_midi):
-                os.remove(temp_midi)
+            if config.encoding == "audio":
+                # Audio mode: save waveform plot
+                from utils_audio import (
+                    synthesize_oscillators_vectorized,
+                    save_waveform_plot,
+                )
+
+                # Re-run simulation to get outputs
+                net = best_ever_individual.genotype.to_network()
+                output_history = np.zeros(
+                    (
+                        config.sim_steps,
+                        best_ever_individual.genotype.num_readouts,
+                        best_ever_individual.genotype.n_outputs_per_readout,
+                    )
+                )
+                with suppress_stdout():
+                    net.manual_activate_most_weighted(1.0)
+                for step in range(config.sim_steps):
+                    net.tick(step)
+                    output_history[step] = net.get_readout_outputs()
+
+                audio, _ = synthesize_oscillators_vectorized(
+                    output_history, sample_rate=config.tempo
+                )
+                save_waveform_plot(
+                    audio,
+                    graph_path,
+                    sample_rate=config.tempo,
+                    title=f"Gen {current_gen} - Fitness {current_best_fitness:.4f}",
+                )
+            else:
+                # MIDI mode: save piano roll
+                temp_midi = f"/tmp/piano_roll_{os.getpid()}_{current_gen}.mid"
+                evaluate_genotype(
+                    best_ever_individual.genotype,
+                    config,
+                    save_midi=True,
+                    midi_filename=temp_midi,
+                )
+                save_piano_roll_png(
+                    temp_midi,
+                    png_path=graph_path,
+                    duration_beats=config.sim_steps / 4,  # 16th notes to beats
+                    tempo=config.tempo,
+                )
+                if os.path.exists(temp_midi):
+                    os.remove(temp_midi)
+
             last_saved_fitness = current_best_fitness
 
         # # Save checkpoint periodically
@@ -1667,30 +1760,83 @@ def run_evolution(
     # Plot successful mutation statistics
     _plot_mutation_stats(successful_mutations, config.output_dir)
 
-    # Save final best MIDI
-    midi_dir = os.path.join(config.output_dir, "midi")
-    graph_dir = os.path.join(config.output_dir, "midi_graphs")
-    os.makedirs(midi_dir, exist_ok=True)
-    os.makedirs(graph_dir, exist_ok=True)
+    # Save final best output
+    if config.encoding == "audio":
+        # Audio mode: save WAV and waveform
+        from utils_audio import (
+            synthesize_oscillators_vectorized,
+            save_wav,
+            save_waveform_plot,
+            save_frequency_plot,
+        )
 
-    filename = f"final_best_{best_ever_fitness:.4f}"
-    final_midi_path = os.path.join(midi_dir, f"{filename}.mid")
-    final_graph_path = os.path.join(graph_dir, f"{filename}.png")
+        audio_dir = os.path.join(config.output_dir, "audio")
+        graph_dir = os.path.join(config.output_dir, "output_graphs")
+        os.makedirs(audio_dir, exist_ok=True)
+        os.makedirs(graph_dir, exist_ok=True)
 
-    evaluate_genotype(
-        best_ever_individual.genotype,
-        config,
-        save_midi=True,
-        midi_filename=final_midi_path,
-    )
-    # Save piano roll visualization
-    save_piano_roll_png(
-        final_midi_path,
-        png_path=final_graph_path,
-        duration_beats=config.sim_steps / 4,  # 16th notes to beats
-        tempo=config.tempo,
-    )
-    print(f"Final best saved to: {final_midi_path}")
+        filename = f"final_best_{best_ever_fitness:.4f}"
+        final_wav_path = os.path.join(audio_dir, f"{filename}.wav")
+        final_graph_path = os.path.join(graph_dir, f"{filename}.png")
+        final_freq_path = os.path.join(graph_dir, f"{filename}_freq.png")
+
+        # Re-run simulation to get outputs
+        net = best_ever_individual.genotype.to_network()
+        output_history = np.zeros(
+            (
+                config.sim_steps,
+                best_ever_individual.genotype.num_readouts,
+                best_ever_individual.genotype.n_outputs_per_readout,
+            )
+        )
+        with suppress_stdout():
+            net.manual_activate_most_weighted(1.0)
+        for step in range(config.sim_steps):
+            net.tick(step)
+            output_history[step] = net.get_readout_outputs()
+
+        audio, freqs = synthesize_oscillators_vectorized(
+            output_history, sample_rate=config.tempo
+        )
+        save_wav(audio, final_wav_path, sample_rate=config.tempo)
+        save_waveform_plot(
+            audio,
+            final_graph_path,
+            sample_rate=config.tempo,
+            title=f"Final Best - Fitness {best_ever_fitness:.4f}",
+        )
+        save_frequency_plot(
+            freqs,
+            final_freq_path,
+            sample_rate=config.tempo,
+            title=f"Final Best - Voice Frequencies",
+        )
+        print(f"Final best saved to: {final_wav_path}")
+    else:
+        # MIDI mode
+        midi_dir = os.path.join(config.output_dir, "midi")
+        graph_dir = os.path.join(config.output_dir, "output_graphs")
+        os.makedirs(midi_dir, exist_ok=True)
+        os.makedirs(graph_dir, exist_ok=True)
+
+        filename = f"final_best_{best_ever_fitness:.4f}"
+        final_midi_path = os.path.join(midi_dir, f"{filename}.mid")
+        final_graph_path = os.path.join(graph_dir, f"{filename}.png")
+
+        evaluate_genotype(
+            best_ever_individual.genotype,
+            config,
+            save_midi=True,
+            midi_filename=final_midi_path,
+        )
+        # Save piano roll visualization
+        save_piano_roll_png(
+            final_midi_path,
+            png_path=final_graph_path,
+            duration_beats=config.sim_steps / 4,  # 16th notes to beats
+            tempo=config.tempo,
+        )
+        print(f"Final best saved to: {final_midi_path}")
 
     return best_ever_individual.genotype, history
 
@@ -1892,6 +2038,8 @@ def _create_mapper_for_encoding(encoding: str) -> Callable[..., str]:
         return create_pitch_class_mapper()
     elif encoding == "motion":
         return create_motion_mapper()
+    elif encoding == "audio":
+        return create_audio_mapper()
     else:
         raise ValueError(f"Unknown encoding: {encoding}")
 
@@ -1963,6 +2111,44 @@ def create_motion_mapper(
     return mapper
 
 
+def create_audio_mapper(
+    sample_rate: int = 11025,
+    freq_min: float = 100.0,
+    freq_max: float = 800.0,
+) -> Callable[..., str]:
+    """
+    Create a mapper for audio encoding (3-output scheme: freq, phase, amp).
+
+    Outputs per voice: [frequency, phase_modulation, amplitude]
+    Each voice is a sine oscillator.
+
+    Args:
+        sample_rate: Audio sample rate in Hz
+        freq_min: Minimum frequency when output=0
+        freq_max: Maximum frequency when output=1
+
+    Note: For audio mode, the 'tempo' parameter passed to mapper is actually sample_rate.
+    """
+    from utils_audio import synthesize_oscillators_vectorized, save_wav
+
+    def mapper(output_history: np.ndarray, filename: str, tempo: int) -> str:
+        # In audio mode, tempo is repurposed as sample_rate
+        actual_sample_rate = tempo if tempo > 1000 else sample_rate
+        audio, _ = synthesize_oscillators_vectorized(
+            output_history,
+            sample_rate=actual_sample_rate,
+            freq_min=freq_min,
+            freq_max=freq_max,
+        )
+        # Ensure .wav extension
+        if not filename.endswith(".wav"):
+            filename = filename.replace(".mid", ".wav")
+        save_wav(audio, filename, sample_rate=actual_sample_rate)
+        return filename
+
+    return mapper
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -1998,6 +2184,20 @@ def get_n_outputs_for_encoding(encoding: str) -> int:
         return 12
     elif encoding == "motion":
         return 7  # 6 motion bits + 1 velocity gate
+    elif encoding == "audio":
+        return 3  # [frequency, phase_modulation, amplitude]
+    else:
+        raise ValueError(f"Unknown encoding: {encoding}")
+
+
+def get_n_readouts_for_encoding(encoding: str) -> int:
+    """Get num_readouts (voices) for encoding type."""
+    if encoding == "pitch":
+        return 4  # 4 voices
+    elif encoding == "motion":
+        return 4  # 4 voices
+    elif encoding == "audio":
+        return 3  # 3 oscillators
     else:
         raise ValueError(f"Unknown encoding: {encoding}")
 
@@ -2022,9 +2222,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--encoding",
         type=str,
-        choices=["pitch", "motion"],
+        choices=["pitch", "motion", "audio"],
         default="pitch",
-        help="Output encoding: 'pitch' (12 chromatic outputs) or 'motion' (8 motion outputs)",
+        help="Output encoding: 'pitch' (12 chromatic), 'motion' (8 motion), or 'audio' (3 oscillator params)",
     )
     parser.add_argument(
         "--eval",
@@ -2054,27 +2254,50 @@ if __name__ == "__main__":
     else:
         # Get outputs per voice for this encoding
         n_outputs = get_n_outputs_for_encoding(args.encoding)
+        n_readouts = get_n_readouts_for_encoding(args.encoding)
 
-        # Fresh run
-        config = EvolutionConfig(
-            generations=args.generations,
-            random_seed=42,
-            save_every_n_generations=5,
-            encoding=args.encoding,
-            evaluator=args.eval,
-        )
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        config.output_dir = f"evolve_midi/{timestamp}_{args.encoding}"
+        # Fresh run - configure based on encoding type
+        if args.encoding == "audio":
+            # Audio mode: sim_steps = samples, tempo = sample_rate
+            config = EvolutionConfig(
+                generations=args.generations,
+                random_seed=42,
+                save_every_n_generations=5,
+                encoding=args.encoding,
+                evaluator="audio",  # Force audio evaluator
+                sim_steps=11025,  # 1 second at 11025 Hz
+                tempo=11025,  # Repurposed as sample_rate
+            )
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            config.output_dir = f"evolve_audio/{timestamp}"
+        else:
+            config = EvolutionConfig(
+                generations=args.generations,
+                random_seed=42,
+                save_every_n_generations=5,
+                encoding=args.encoding,
+                evaluator=args.eval,
+            )
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            config.output_dir = f"evolve_midi/{timestamp}_{args.encoding}"
 
         # Create initial population with correct output size
-        print(f"Encoding: {args.encoding} ({n_outputs} outputs per voice)")
-        print(f"Evaluator: {args.eval}")
+        print(
+            f"Encoding: {args.encoding} ({n_outputs} outputs per voice, {n_readouts} voices)"
+        )
+        print(f"Evaluator: {config.evaluator}")
+        if args.encoding == "audio":
+            print(
+                f"Sample rate: {config.tempo} Hz, Duration: {config.sim_steps / config.tempo:.2f}s"
+            )
         np.random.seed(config.random_seed)
 
         initial_population = [
             Individual(
-                genotype=NetworkGenotype.random(n_outputs_per_readout=n_outputs),
+                genotype=NetworkGenotype.random(
+                    num_readouts=n_readouts,
+                    n_outputs_per_readout=n_outputs,
+                ),
                 generation_born=0,
             )
             for _ in range(config.mu)
