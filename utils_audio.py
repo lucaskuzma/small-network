@@ -367,7 +367,7 @@ if __name__ == "__main__":
 
     np.random.seed(42)
 
-    num_samples = 11025  # 1 second at 11025 Hz
+    num_samples = DEFAULT_SAMPLE_RATE  # 1 second
     num_voices = 3
 
     # Simulate network outputs: smooth random walks

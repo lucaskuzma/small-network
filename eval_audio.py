@@ -487,7 +487,7 @@ if __name__ == "__main__":
 
     # Create test outputs
     np.random.seed(42)
-    num_samples = 11025
+    num_samples = DEFAULT_SAMPLE_RATE
     num_voices = 3
 
     # Test 1: Perfectly consonant (voices at octaves)

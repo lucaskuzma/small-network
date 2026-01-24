@@ -427,6 +427,8 @@ def _save_generation_plot(
 # Configuration
 # =============================================================================
 
+from utils_audio import DEFAULT_SAMPLE_RATE as AUDIO_SAMPLE_RATE
+
 # Encoding-specific configuration (one place for all encoding settings)
 ENCODING_CONFIGS = {
     "pitch": {
@@ -435,6 +437,7 @@ ENCODING_CONFIGS = {
         "evaluator": "basic",
         "sim_steps": 128,
         "tempo": 60,
+        "sample_rate": None,
         "output_dir_prefix": "evolve_midi",
     },
     "motion": {
@@ -443,14 +446,16 @@ ENCODING_CONFIGS = {
         "evaluator": "basic",
         "sim_steps": 128,
         "tempo": 60,
+        "sample_rate": None,
         "output_dir_prefix": "evolve_midi",
     },
     "audio": {
         "n_readouts": 3,
         "n_outputs_per_readout": 3,
         "evaluator": "audio",
-        "sim_steps": 256,  # 1 second at 11025 Hz sample rate
-        "tempo": 11025,  # Repurposed as sample_rate for audio
+        "sim_steps": AUDIO_SAMPLE_RATE,  # 1 second of audio
+        "tempo": 60,  # Not used for audio
+        "sample_rate": AUDIO_SAMPLE_RATE,
         "output_dir_prefix": "evolve_audio",
     },
 }
@@ -470,7 +475,8 @@ class EvolutionConfig:
 
     # Simulation parameters
     sim_steps: int = 128
-    tempo: int = 60
+    tempo: int = 60  # BPM for MIDI
+    sample_rate: Optional[int] = None  # Hz for audio mode
 
     # Mutation parameters
     weight_mutation_rate: float = 0.1
@@ -559,6 +565,7 @@ def save_params_txt(config: EvolutionConfig, output_path: str) -> None:
         f"# === Simulation ===",
         f"sim_steps = {config.sim_steps}",
         f"tempo = {config.tempo}",
+        f"sample_rate = {config.sample_rate}",
         f"encoding = {config.encoding}",
         f"evaluator = {config.evaluator}",
         f"",
@@ -957,9 +964,9 @@ def evaluate_genotype(
                 os.makedirs(os.path.dirname(wav_filename), exist_ok=True)
                 audio, _ = synthesize_oscillators_vectorized(
                     output_history,
-                    sample_rate=config.tempo,  # tempo = sample_rate for audio
+                    sample_rate=config.sample_rate,
                 )
-                save_wav(audio, wav_filename, sample_rate=config.tempo)
+                save_wav(audio, wav_filename, sample_rate=config.sample_rate)
 
         except Exception as e:
             print(f"Audio evaluation error: {e}")
@@ -1721,11 +1728,15 @@ def run_evolution(
             graph_path = os.path.join(graph_dir, f"{filename}.png")
 
             if config.encoding == "audio":
-                # Audio mode: save frequency plot (shows all voices)
+                # Audio mode: save frequency plot and WAV
                 from utils_audio import (
                     synthesize_oscillators_vectorized,
                     save_frequency_plot,
+                    save_wav,
                 )
+
+                audio_dir = os.path.join(config.output_dir, "audio")
+                os.makedirs(audio_dir, exist_ok=True)
 
                 # Re-run simulation to get outputs
                 net = best_ever_individual.genotype.to_network()
@@ -1742,15 +1753,17 @@ def run_evolution(
                     net.tick(step)
                     output_history[step] = net.get_readout_outputs()
 
-                _, freqs = synthesize_oscillators_vectorized(
-                    output_history, sample_rate=config.tempo
+                audio, freqs = synthesize_oscillators_vectorized(
+                    output_history, sample_rate=config.sample_rate
                 )
                 save_frequency_plot(
                     freqs,
                     graph_path,
-                    sample_rate=config.tempo,
+                    sample_rate=config.sample_rate,
                     title=f"Gen {current_gen} - Fitness {current_best_fitness:.4f}",
                 )
+                wav_path = os.path.join(audio_dir, f"{filename}.wav")
+                save_wav(audio, wav_path, sample_rate=config.sample_rate)
             else:
                 # MIDI mode: save piano roll
                 temp_midi = f"/tmp/piano_roll_{os.getpid()}_{current_gen}.mid"
@@ -1830,19 +1843,19 @@ def run_evolution(
             output_history[step] = net.get_readout_outputs()
 
         audio, freqs = synthesize_oscillators_vectorized(
-            output_history, sample_rate=config.tempo
+            output_history, sample_rate=config.sample_rate
         )
-        save_wav(audio, final_wav_path, sample_rate=config.tempo)
+        save_wav(audio, final_wav_path, sample_rate=config.sample_rate)
         save_waveform_plot(
             audio,
             final_graph_path,
-            sample_rate=config.tempo,
+            sample_rate=config.sample_rate,
             title=f"Final Best - Fitness {best_ever_fitness:.4f}",
         )
         save_frequency_plot(
             freqs,
             final_freq_path,
-            sample_rate=config.tempo,
+            sample_rate=config.sample_rate,
             title=f"Final Best - Voice Frequencies",
         )
         print(f"Final best saved to: {final_wav_path}")
@@ -2146,7 +2159,7 @@ def create_motion_mapper(
 
 
 def create_audio_mapper(
-    sample_rate: int = 11025,
+    sample_rate: int = AUDIO_SAMPLE_RATE,
     freq_min: float = 100.0,
     freq_max: float = 800.0,
 ) -> Callable[..., str]:
@@ -2277,6 +2290,7 @@ if __name__ == "__main__":
             evaluator=enc_config["evaluator"],
             sim_steps=enc_config["sim_steps"],
             tempo=enc_config["tempo"],
+            sample_rate=enc_config["sample_rate"],
             output_dir=f"{enc_config['output_dir_prefix']}/{timestamp}",
         )
 
@@ -2285,7 +2299,7 @@ if __name__ == "__main__":
         print(f"Evaluator: {config.evaluator}")
         if args.encoding == "audio":
             print(
-                f"Sample rate: {config.tempo} Hz, Duration: {config.sim_steps / config.tempo:.2f}s"
+                f"Sample rate: {config.sample_rate} Hz, Duration: {config.sim_steps / config.sample_rate:.2f}s"
             )
         np.random.seed(config.random_seed)
 

@@ -26,7 +26,7 @@ from eval_audio import evaluate_audio, AudioMetrics
 # =============================================================================
 
 # Audio parameters
-SAMPLE_RATE = 11025  # Quick iteration (44100 for final quality)
+SAMPLE_RATE = DEFAULT_SAMPLE_RATE
 DURATION_SECONDS = 1.0
 NUM_SAMPLES = int(SAMPLE_RATE * DURATION_SECONDS)
 
