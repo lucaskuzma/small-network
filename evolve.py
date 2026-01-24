@@ -1728,7 +1728,7 @@ def plot_evolution_history(
         color="blue",
         label="Mean ± std",
     )
-    ax.plot(generations, mean_fitness, "b--", alpha=0.7, label="Mean")
+    ax.plot(generations, mean_fitness, "b-", alpha=0.7, label="Mean")
     ax.set_xlabel("Generation")
     ax.set_ylabel("Fitness")
     ax.set_title("Fitness Over Generations")
@@ -1741,7 +1741,7 @@ def plot_evolution_history(
     ax.plot(
         generations,
         modal_consistency,
-        "--",
+        "-",
         color="#9b59b6",
         linewidth=2,
         label="Modality",
@@ -1750,7 +1750,7 @@ def plot_evolution_history(
     ax.plot(
         generations,
         activity,
-        ":",
+        "-",
         color="#27ae60",
         linewidth=2,
         label="Activity",
@@ -1759,7 +1759,7 @@ def plot_evolution_history(
     ax.plot(
         generations,
         diversity,
-        "-.",
+        "-",
         color="#e67e22",
         linewidth=2,
         label="Diversity",
