@@ -429,8 +429,8 @@ class EvolutionConfig:
     """Configuration for evolution run."""
 
     # Evolution parameters
-    mu: int = 20  # Number of parents to keep
-    num_offspring: int = 100  # Number of mutated offspring per generation
+    mu: int = 32  # Number of parents to keep
+    num_offspring: int = 160  # Number of mutated offspring per generation
     num_randoms: int = (
         0  # Number of fresh randoms per generation (mutations proven more effective)
     )
@@ -2057,9 +2057,6 @@ if __name__ == "__main__":
 
         # Fresh run
         config = EvolutionConfig(
-            mu=32,
-            num_offspring=160,  # 5x parents to try all mutation strategies
-            num_randoms=0,  # Randoms score zero with sparse networks
             generations=args.generations,
             random_seed=42,
             save_every_n_generations=5,
