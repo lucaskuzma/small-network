@@ -7,7 +7,7 @@ import numpy as np
 # =============================================================================
 # Default hyperparameters
 # =============================================================================
-DEFAULT_NUM_NEURONS = 16
+DEFAULT_NUM_NEURONS = 64
 DEFAULT_NUM_READOUTS = 4
 DEFAULT_N_OUTPUTS_PER_READOUT = 12
 DEFAULT_ACTIVATION_LEAK = 0.98
@@ -17,8 +17,8 @@ DEFAULT_NETWORK_SPARSITY = 0.5
 DEFAULT_NETWORK_WEIGHT_SCALE = 0.5
 DEFAULT_WEIGHT_THRESHOLD = 0.05
 
-DEFAULT_OUTPUT_SPARSITY = 0.5
-DEFAULT_OUTPUT_WEIGHT_SCALE = 0.5
+DEFAULT_OUTPUT_SPARSITY = 0.7
+DEFAULT_OUTPUT_WEIGHT_SCALE = 0.7
 
 DEFAULT_REFRACTION_PERIOD = 2
 DEFAULT_REFRACTION_VARIATION = 30

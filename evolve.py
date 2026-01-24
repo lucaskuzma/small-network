@@ -449,7 +449,7 @@ ENCODING_CONFIGS = {
         "n_readouts": 3,
         "n_outputs_per_readout": 3,
         "evaluator": "audio",
-        "sim_steps": 11025,  # 1 second at 11025 Hz sample rate
+        "sim_steps": 256,  # 1 second at 11025 Hz sample rate
         "tempo": 11025,  # Repurposed as sample_rate for audio
         "output_dir_prefix": "evolve_audio",
     },

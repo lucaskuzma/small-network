@@ -441,10 +441,8 @@ class AudioAnalyzer:
         stability = compute_frequency_stability(freqs)
         independence = compute_voice_independence(freqs)
 
-        # Composite score: MULTIPLICATIVE
-        # All components must be non-zero. Silence = zero fitness.
-        # This prevents gaming by being silent.
-        composite = consonance * activity * stability * max(0.1, independence)
+        # Composite score: consonance * activity
+        composite = consonance * activity
 
         return AudioMetrics(
             consonance=consonance,
