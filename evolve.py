@@ -466,7 +466,7 @@ class EvolutionConfig:
     evaluator: str = "basic"
 
     # Speciation: protect diverse solutions from premature elimination
-    use_speciation: bool = False
+    use_speciation: bool = True
     num_species: int = 4  # Target number of species
     species_distance_threshold: float = 0.001  # Genotype distance to be same species
 
@@ -2060,8 +2060,6 @@ if __name__ == "__main__":
             mu=32,
             num_offspring=160,  # 5x parents to try all mutation strategies
             num_randoms=0,  # Randoms score zero with sparse networks
-            use_speciation=False,
-            num_species=4,
             generations=args.generations,
             random_seed=42,
             save_every_n_generations=5,
