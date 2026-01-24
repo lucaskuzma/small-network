@@ -268,35 +268,35 @@ def _save_generation_plot(
             alpha=0.9,
             zorder=3,
         )
-        # Modality - dashed purple
+        # Modality - solid purple
         ax.hlines(
             offspring_mod_med,
             0.35,
             0.6,
             colors="#9b59b6",
-            linestyles="--",
+            linestyles="-",
             linewidth=1.5,
             alpha=0.8,
             zorder=3,
         )
-        # Activity - dotted green
+        # Activity - solid green
         ax.hlines(
             offspring_act_med,
             0.35,
             0.6,
             colors="#27ae60",
-            linestyles=":",
+            linestyles="-",
             linewidth=1.5,
             alpha=0.8,
             zorder=3,
         )
-        # Diversity - dash-dot orange
+        # Diversity - solid orange
         ax.hlines(
             offspring_div_med,
             0.35,
             0.6,
             colors="#e67e22",
-            linestyles="-.",
+            linestyles="-",
             linewidth=1.5,
             alpha=0.8,
             zorder=3,
@@ -318,35 +318,35 @@ def _save_generation_plot(
             alpha=0.9,
             zorder=3,
         )
-        # Modality - dashed purple
+        # Modality - solid purple
         ax.hlines(
             random_mod_med,
             0.7,
             0.95,
             colors="#9b59b6",
-            linestyles="--",
+            linestyles="-",
             linewidth=1.5,
             alpha=0.8,
             zorder=3,
         )
-        # Activity - dotted green
+        # Activity - solid green
         ax.hlines(
             random_act_med,
             0.7,
             0.95,
             colors="#27ae60",
-            linestyles=":",
+            linestyles="-",
             linewidth=1.5,
             alpha=0.8,
             zorder=3,
         )
-        # Diversity - dash-dot orange
+        # Diversity - solid orange
         ax.hlines(
             random_div_med,
             0.7,
             0.95,
             colors="#e67e22",
-            linestyles="-.",
+            linestyles="-",
             linewidth=1.5,
             alpha=0.8,
             zorder=3,
@@ -358,7 +358,7 @@ def _save_generation_plot(
         [],
         [],
         colors="#9b59b6",
-        linestyles="--",
+        linestyles="-",
         linewidth=1.5,
         label="Modality median",
     )
@@ -367,7 +367,7 @@ def _save_generation_plot(
         [],
         [],
         colors="#27ae60",
-        linestyles=":",
+        linestyles="-",
         linewidth=1.5,
         label="Activity median",
     )
@@ -376,7 +376,7 @@ def _save_generation_plot(
         [],
         [],
         colors="#e67e22",
-        linestyles="-.",
+        linestyles="-",
         linewidth=1.5,
         label="Diversity median",
     )
