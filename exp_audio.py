@@ -121,6 +121,48 @@ def run_simulation(
     return output_history
 
 
+def plot_output_activations(
+    output_history: np.ndarray,
+    filename: str,
+    sample_rate: int = SAMPLE_RATE,
+):
+    """Plot raw output values over time for each voice and channel."""
+    import matplotlib.pyplot as plt
+
+    T, num_voices, num_outputs = output_history.shape
+    time_axis = np.arange(T) / sample_rate
+    labels = ["Freq", "Phase", "Amp"]
+
+    fig, axes = plt.subplots(
+        num_voices, num_outputs, figsize=(14, 3 * num_voices), sharex=True
+    )
+
+    for v in range(num_voices):
+        for o in range(num_outputs):
+            ax = axes[v, o] if num_voices > 1 else axes[o]
+            ax.plot(time_axis, output_history[:, v, o], linewidth=0.5, color="C0")
+            ax.set_ylabel(f"V{v} {labels[o]}")
+            ax.set_ylim(-0.05, 1.05)
+            ax.axhline(0.5, color="gray", linestyle="--", linewidth=0.5, alpha=0.5)
+            vals = output_history[:, v, o]
+            ax.set_title(
+                f"min={vals.min():.3f} max={vals.max():.3f} mean={vals.mean():.3f}",
+                fontsize=8,
+            )
+
+    if num_voices > 1:
+        for o in range(num_outputs):
+            axes[-1, o].set_xlabel("Time (s)")
+    else:
+        for o in range(num_outputs):
+            axes[o].set_xlabel("Time (s)")
+
+    plt.suptitle("Raw Network Output Activations")
+    plt.tight_layout()
+    plt.savefig(filename, dpi=150)
+    plt.close()
+
+
 # =============================================================================
 # Full pipeline
 # =============================================================================
@@ -152,6 +194,11 @@ def synthesize_and_evaluate(
     print(f"Running simulation ({num_samples} samples)...")
     output_history = run_simulation(genotype, num_samples)
 
+    # Plot raw outputs
+    outputs_path = os.path.join(output_dir, f"{name}_outputs.png")
+    plot_output_activations(output_history, outputs_path, sample_rate)
+    print(f"  Outputs: {outputs_path}")
+
     # Evaluate fitness
     print("Evaluating...")
     metrics = evaluate_audio(output_history)
@@ -167,12 +214,17 @@ def synthesize_and_evaluate(
 
     waveform_path = os.path.join(output_dir, f"{name}_waveform.png")
     save_waveform_plot(
-        audio, waveform_path, sample_rate, title=f"{name} (fitness={metrics.composite_score:.3f})"
+        audio,
+        waveform_path,
+        sample_rate,
+        title=f"{name} (fitness={metrics.composite_score:.3f})",
     )
     print(f"  Waveform: {waveform_path}")
 
     freq_path = os.path.join(output_dir, f"{name}_frequencies.png")
-    save_frequency_plot(freqs, freq_path, sample_rate, title=f"{name} Voice Frequencies")
+    save_frequency_plot(
+        freqs, freq_path, sample_rate, title=f"{name} Voice Frequencies"
+    )
     print(f"  Frequencies: {freq_path}")
 
     spec_path = os.path.join(output_dir, f"{name}_spectrogram.png")
@@ -290,12 +342,16 @@ def experiment_mutation_effect(
             threshold_mutation_rate=0.1,
             threshold_mutation_scale=0.1,
         )
-        child_metrics, _ = synthesize_and_evaluate(child, exp_dir, name=f"child_{i:03d}")
+        child_metrics, _ = synthesize_and_evaluate(
+            child, exp_dir, name=f"child_{i:03d}"
+        )
         results.append((f"child_{i:03d}", child_metrics))
 
         diff = child_metrics.composite_score - parent_metrics.composite_score
         indicator = "+" if diff > 0 else ""
-        print(f"  Child {i}: {child_metrics.composite_score:.3f} ({indicator}{diff:.3f})")
+        print(
+            f"  Child {i}: {child_metrics.composite_score:.3f} ({indicator}{diff:.3f})"
+        )
 
     # Summary
     child_scores = [m.composite_score for name, m in results[1:]]
@@ -305,8 +361,12 @@ def experiment_mutation_effect(
     print("Summary")
     print("=" * 60)
     print(f"Parent: {parent_metrics.composite_score:.3f}")
-    print(f"Children: mean={np.mean(child_scores):.3f}, best={np.max(child_scores):.3f}")
-    print(f"Improvements: {improvements}/{n_mutations} ({100*improvements/n_mutations:.0f}%)")
+    print(
+        f"Children: mean={np.mean(child_scores):.3f}, best={np.max(child_scores):.3f}"
+    )
+    print(
+        f"Improvements: {improvements}/{n_mutations} ({100*improvements/n_mutations:.0f}%)"
+    )
 
     return results
 
@@ -346,4 +406,3 @@ if __name__ == "__main__":
         experiment_random_networks(n_networks=args.n)
     elif args.exp == "mutation":
         experiment_mutation_effect(n_mutations=args.n)
-
