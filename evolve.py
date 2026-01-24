@@ -427,6 +427,34 @@ def _save_generation_plot(
 # Configuration
 # =============================================================================
 
+# Encoding-specific configuration (one place for all encoding settings)
+ENCODING_CONFIGS = {
+    "pitch": {
+        "n_readouts": 4,
+        "n_outputs_per_readout": 12,
+        "evaluator": "basic",
+        "sim_steps": 128,
+        "tempo": 60,
+        "output_dir_prefix": "evolve_midi",
+    },
+    "motion": {
+        "n_readouts": 4,
+        "n_outputs_per_readout": 7,
+        "evaluator": "basic",
+        "sim_steps": 128,
+        "tempo": 60,
+        "output_dir_prefix": "evolve_midi",
+    },
+    "audio": {
+        "n_readouts": 3,
+        "n_outputs_per_readout": 3,
+        "evaluator": "audio",
+        "sim_steps": 11025,  # 1 second at 11025 Hz sample rate
+        "tempo": 11025,  # Repurposed as sample_rate for audio
+        "output_dir_prefix": "evolve_audio",
+    },
+}
+
 
 @dataclass
 class EvolutionConfig:
@@ -811,9 +839,15 @@ class EvalResult:
     activity_trend: float  # ratio of 2nd/1st half firing (used for culling)
     note_count: int = 0  # number of MIDI notes generated
     note_density: float = 0.0  # notes per beat
-    modal_consistency: float = 0.0  # 0-1, how well notes fit a scale (or consonance for audio)
-    activity: float = 0.0  # 0-1, based on note density (or amplitude activity for audio)
-    diversity: float = 0.0  # 0-1, pitch variety + anti-repetition (or independence for audio)
+    modal_consistency: float = (
+        0.0  # 0-1, how well notes fit a scale (or consonance for audio)
+    )
+    activity: float = (
+        0.0  # 0-1, based on note density (or amplitude activity for audio)
+    )
+    diversity: float = (
+        0.0  # 0-1, pitch variety + anti-repetition (or independence for audio)
+    )
     midi_path: Optional[str] = None
     # Output statistics for debugging activity ceiling
     output_max: float = 0.0  # max output value across all timesteps
@@ -2178,30 +2212,6 @@ def resume_evolution(
     )
 
 
-def get_n_outputs_for_encoding(encoding: str) -> int:
-    """Get n_outputs_per_readout for encoding type."""
-    if encoding == "pitch":
-        return 12
-    elif encoding == "motion":
-        return 7  # 6 motion bits + 1 velocity gate
-    elif encoding == "audio":
-        return 3  # [frequency, phase_modulation, amplitude]
-    else:
-        raise ValueError(f"Unknown encoding: {encoding}")
-
-
-def get_n_readouts_for_encoding(encoding: str) -> int:
-    """Get num_readouts (voices) for encoding type."""
-    if encoding == "pitch":
-        return 4  # 4 voices
-    elif encoding == "motion":
-        return 4  # 4 voices
-    elif encoding == "audio":
-        return 3  # 3 oscillators
-    else:
-        raise ValueError(f"Unknown encoding: {encoding}")
-
-
 if __name__ == "__main__":
     import argparse
 
@@ -2252,39 +2262,26 @@ if __name__ == "__main__":
             additional_generations=args.generations,
         )
     else:
-        # Get outputs per voice for this encoding
-        n_outputs = get_n_outputs_for_encoding(args.encoding)
-        n_readouts = get_n_readouts_for_encoding(args.encoding)
+        # Get encoding-specific config
+        enc_config = ENCODING_CONFIGS[args.encoding]
+        n_outputs = enc_config["n_outputs_per_readout"]
+        n_readouts = enc_config["n_readouts"]
 
-        # Fresh run - configure based on encoding type
-        if args.encoding == "audio":
-            # Audio mode: sim_steps = samples, tempo = sample_rate
-            config = EvolutionConfig(
-                generations=args.generations,
-                random_seed=42,
-                save_every_n_generations=5,
-                encoding=args.encoding,
-                evaluator="audio",  # Force audio evaluator
-                sim_steps=11025,  # 1 second at 11025 Hz
-                tempo=11025,  # Repurposed as sample_rate
-            )
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            config.output_dir = f"evolve_audio/{timestamp}"
-        else:
-            config = EvolutionConfig(
-                generations=args.generations,
-                random_seed=42,
-                save_every_n_generations=5,
-                encoding=args.encoding,
-                evaluator=args.eval,
-            )
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            config.output_dir = f"evolve_midi/{timestamp}_{args.encoding}"
-
-        # Create initial population with correct output size
-        print(
-            f"Encoding: {args.encoding} ({n_outputs} outputs per voice, {n_readouts} voices)"
+        # Fresh run using encoding config
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        config = EvolutionConfig(
+            generations=args.generations,
+            random_seed=42,
+            save_every_n_generations=5,
+            encoding=args.encoding,
+            evaluator=enc_config["evaluator"],
+            sim_steps=enc_config["sim_steps"],
+            tempo=enc_config["tempo"],
+            output_dir=f"{enc_config['output_dir_prefix']}/{timestamp}",
         )
+
+        # Print config
+        print(f"Encoding: {args.encoding} ({n_outputs} outputs × {n_readouts} voices)")
         print(f"Evaluator: {config.evaluator}")
         if args.encoding == "audio":
             print(
