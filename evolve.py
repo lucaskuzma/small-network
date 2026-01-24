@@ -530,7 +530,7 @@ def save_params_txt(config: EvolutionConfig, output_path: str) -> None:
         f"encoding = {config.encoding}",
         f"evaluator = {config.evaluator}",
         f"",
-        f"# === Mutation (from config) ===",
+        f"# === Mutation ===",
         f"weight_mutation_rate = {config.weight_mutation_rate}",
         f"weight_mutation_scale = {config.weight_mutation_scale}",
         f"threshold_mutation_rate = {config.threshold_mutation_rate}",

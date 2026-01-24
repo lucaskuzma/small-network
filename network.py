@@ -7,7 +7,7 @@ import numpy as np
 # =============================================================================
 # Default hyperparameters
 # =============================================================================
-DEFAULT_NUM_NEURONS = 1024
+DEFAULT_NUM_NEURONS = 256
 DEFAULT_NUM_READOUTS = 4
 DEFAULT_N_OUTPUTS_PER_READOUT = 12
 DEFAULT_ACTIVATION_LEAK = 0.98
