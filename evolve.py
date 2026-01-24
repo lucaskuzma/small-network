@@ -1721,10 +1721,10 @@ def run_evolution(
             graph_path = os.path.join(graph_dir, f"{filename}.png")
 
             if config.encoding == "audio":
-                # Audio mode: save waveform plot
+                # Audio mode: save frequency plot (shows all voices)
                 from utils_audio import (
                     synthesize_oscillators_vectorized,
-                    save_waveform_plot,
+                    save_frequency_plot,
                 )
 
                 # Re-run simulation to get outputs
@@ -1742,11 +1742,11 @@ def run_evolution(
                     net.tick(step)
                     output_history[step] = net.get_readout_outputs()
 
-                audio, _ = synthesize_oscillators_vectorized(
+                _, freqs = synthesize_oscillators_vectorized(
                     output_history, sample_rate=config.tempo
                 )
-                save_waveform_plot(
-                    audio,
+                save_frequency_plot(
+                    freqs,
                     graph_path,
                     sample_rate=config.tempo,
                     title=f"Gen {current_gen} - Fitness {current_best_fitness:.4f}",
