@@ -949,6 +949,9 @@ class GenerationStats:
     # Species counts (how many parents in each species, if speciation enabled)
     species_counts: dict = field(default_factory=dict)  # species_id -> count in top μ
     num_species: int = 0  # number of active species
+    # Per-generation wins (offspring/randoms that made it into parent pool)
+    gen_wins_mutation: int = 0
+    gen_wins_random: int = 0
 
 
 @dataclass
@@ -1513,6 +1516,8 @@ def run_evolution(
             lineage_counts=lineage_counts,
             species_counts=species_counts,
             num_species=num_active_species,
+            gen_wins_mutation=gen_wins_mut,
+            gen_wins_random=gen_wins_rnd,
         )
         history.append(stats)
 
@@ -1676,7 +1681,7 @@ def run_evolution(
 def plot_evolution_history(
     history: list[GenerationStats], save_path: Optional[str] = None
 ):
-    """Plot evolution progress: fitness charts on top, lineage chart on bottom."""
+    """Plot evolution progress: fitness charts on top, lineage and wins on bottom."""
 
     generations = [s.generation for s in history]
     best_fitness = [s.best_fitness for s in history]
@@ -1684,8 +1689,10 @@ def plot_evolution_history(
     std_fitness = [s.std_fitness for s in history]
     activity = [s.best_activity for s in history]
     diversity = [s.best_diversity for s in history]
+    wins_mut = [s.gen_wins_mutation for s in history]
+    wins_rnd = [s.gen_wins_random for s in history]
 
-    # Create figure with 2 rows: top row has 2 columns, bottom row spans full width
+    # Create figure with 2 rows, 2 columns
     fig = plt.figure(figsize=(14, 10))
     gs = fig.add_gridspec(2, 2, height_ratios=[1, 1])
 
@@ -1735,8 +1742,8 @@ def plot_evolution_history(
     ax.legend(loc="best")
     ax.grid(True, alpha=0.3)
 
-    # Bottom: Species or Lineage survival (spans full width)
-    ax = fig.add_subplot(gs[1, :])
+    # Bottom left: Species or Lineage survival
+    ax = fig.add_subplot(gs[1, 0])
 
     # Check if we have species data (speciation was enabled)
     has_species = history and any(s.species_counts for s in history)
@@ -1834,6 +1841,50 @@ def plot_evolution_history(
     else:
         ax.text(0.5, 0.5, "No lineage/species data", ha="center", va="center")
         ax.set_title("Population Diversity")
+
+    # Bottom right: Wins over time (offspring/randoms elected to parent pool)
+    ax = fig.add_subplot(gs[1, 1])
+
+    # Cumulative wins
+    cumulative_mut = np.cumsum(wins_mut)
+    cumulative_rnd = np.cumsum(wins_rnd)
+
+    # Plot cumulative wins as area chart
+    ax.fill_between(
+        generations,
+        0,
+        cumulative_mut,
+        color="#3498db",
+        alpha=0.7,
+        label="Mutations",
+    )
+    ax.fill_between(
+        generations,
+        cumulative_mut,
+        cumulative_mut + cumulative_rnd,
+        color="#e74c3c",
+        alpha=0.7,
+        label="Randoms",
+    )
+
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("Cumulative Wins")
+    ax.set_title("Elections to Parent Pool")
+    ax.set_xlim(generations[0], generations[-1])
+    ax.legend(loc="upper left")
+    ax.grid(True, alpha=0.3)
+
+    # Add final counts as text
+    ax.text(
+        0.98,
+        0.02,
+        f"Total: {cumulative_mut[-1]} mut, {cumulative_rnd[-1]} rnd",
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=10,
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+    )
 
     plt.tight_layout()
 
