@@ -7,7 +7,10 @@ import numpy as np
 # =============================================================================
 # Default hyperparameters
 # =============================================================================
-DEFAULT_N_OUTPUTS_PER_READOUT = 5
+# In-Sen pentatonic scale: C, Db, F, G, Bb
+IN_SEN_SCALE = [0, 1, 5, 7, 10]
+
+DEFAULT_N_OUTPUTS_PER_READOUT = len(IN_SEN_SCALE)  # 5 for In-Sen
 DEFAULT_NUM_READOUTS = 4
 NEURONS_PER_OUTPUT = 8
 DEFAULT_NUM_NEURONS = (

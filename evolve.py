@@ -17,7 +17,7 @@ from typing import Optional, Union
 from tqdm import tqdm
 
 from enum import Enum
-from network import NeuralNetwork, NetworkGenotype
+from network import NeuralNetwork, NetworkGenotype, IN_SEN_SCALE
 from eval_ambient import evaluate_ambient
 from eval_basic import evaluate_basic
 from utils_sonic import save_piano_roll_png
@@ -1850,22 +1850,16 @@ def create_pitch_class_mapper(
     min_threshold: float = 0.3,
 ) -> Callable[..., str]:
     """
-    Create a mapper for In-Sen pentatonic scale (5-output scheme).
+    Create a mapper for In-Sen pentatonic scale.
 
-    Each of 5 outputs per voice maps to a pitch in the In-Sen scale:
-    In-Sen: C, Db, F, G, Bb (semitones: 0, 1, 5, 7, 10)
-
-    Uses argmax: only the highest output per voice per timestep triggers a note,
-    and only if it exceeds min_threshold.
+    Uses IN_SEN_SCALE from network.py as the single source of truth.
+    Each output maps to a pitch in the scale via argmax selection.
 
     Args:
         base_notes: Base MIDI note per voice (C in each octave)
         min_threshold: Minimum output value for argmax winner to trigger note
     """
     from utils_sonic import save_argmax_outputs_as_midi
-
-    # In-Sen scale intervals from root
-    in_sen_intervals = [0, 1, 5, 7, 10]  # C, Db, F, G, Bb
 
     def mapper(output_history: np.ndarray, filename: str, tempo: int) -> str:
         save_argmax_outputs_as_midi(
@@ -1874,7 +1868,7 @@ def create_pitch_class_mapper(
             tempo=tempo,
             min_threshold=min_threshold,
             base_notes=base_notes,
-            pitch_intervals=in_sen_intervals,
+            pitch_intervals=IN_SEN_SCALE,
         )
         return filename
 
@@ -1947,16 +1941,6 @@ def resume_evolution(
     )
 
 
-def get_n_outputs_for_encoding(encoding: str) -> int:
-    """Get n_outputs_per_readout for encoding type."""
-    if encoding == "pitch":
-        return 5  # In-Sen pentatonic: C, Db, F, G, Bb
-    elif encoding == "motion":
-        return 7  # 6 motion bits + 1 velocity gate
-    else:
-        raise ValueError(f"Unknown encoding: {encoding}")
-
-
 if __name__ == "__main__":
     import argparse
 
@@ -1979,7 +1963,7 @@ if __name__ == "__main__":
         type=str,
         choices=["pitch", "motion"],
         default="pitch",
-        help="Output encoding: 'pitch' (12 chromatic outputs) or 'motion' (8 motion outputs)",
+        help="Output encoding: 'pitch' (In-Sen pentatonic) or 'motion' (motion-based)",
     )
     parser.add_argument(
         "--eval",
@@ -2007,10 +1991,12 @@ if __name__ == "__main__":
             additional_generations=args.generations,
         )
     else:
-        # Get outputs per voice for this encoding
-        n_outputs = get_n_outputs_for_encoding(args.encoding)
+        # Fresh run - pitch uses defaults (In-Sen scale), motion has its own
+        if args.encoding == "motion":
+            n_outputs = 7  # motion encoding: 6 motion bits + 1 velocity gate
+        else:
+            n_outputs = len(IN_SEN_SCALE)  # pitch encoding uses In-Sen scale
 
-        # Fresh run
         config = EvolutionConfig(
             generations=args.generations,
             random_seed=44,
@@ -2022,7 +2008,6 @@ if __name__ == "__main__":
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         config.output_dir = f"evolve_midi/{timestamp}_{args.encoding}"
 
-        # Create initial population with correct output size
         print(f"Encoding: {args.encoding} ({n_outputs} outputs per voice)")
         print(f"Evaluator: {args.eval}")
         np.random.seed(config.random_seed)
