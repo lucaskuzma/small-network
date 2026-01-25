@@ -399,6 +399,7 @@ def save_argmax_outputs_as_midi(
     tempo: int = 120,
     min_threshold: float = 0.3,
     base_notes: list = None,
+    pitch_intervals: list = None,
 ):
     """
     Save network outputs as MIDI using argmax selection per voice.
@@ -412,6 +413,8 @@ def save_argmax_outputs_as_midi(
         tempo: beats per minute
         min_threshold: minimum output value for argmax winner to trigger note
         base_notes: base MIDI note per voice (default: [48, 60, 72, 84])
+        pitch_intervals: semitone offsets from base note for each output index
+                        (default: chromatic [0,1,2,...,n_pitches-1])
     """
     from mido import Message, MidiFile, MidiTrack, MetaMessage
 
@@ -430,6 +433,10 @@ def save_argmax_outputs_as_midi(
     # Ensure enough base notes
     while len(base_notes) < num_voices:
         base_notes.append(base_notes[-1] + 12)
+
+    # Default pitch intervals (chromatic: 0, 1, 2, ..., n_pitches-1)
+    if pitch_intervals is None:
+        pitch_intervals = list(range(n_pitches))
 
     # Create MIDI file
     mid = MidiFile()
@@ -462,7 +469,7 @@ def save_argmax_outputs_as_midi(
             # Determine target note (or None if below threshold)
             target_note = None
             if best_val > min_threshold:
-                target_note = base_note + best_idx
+                target_note = base_note + pitch_intervals[best_idx]
 
             # Handle note transitions
             if target_note != current_note:

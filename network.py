@@ -7,7 +7,7 @@ import numpy as np
 # =============================================================================
 # Default hyperparameters
 # =============================================================================
-DEFAULT_N_OUTPUTS_PER_READOUT = 12
+DEFAULT_N_OUTPUTS_PER_READOUT = 5
 DEFAULT_NUM_READOUTS = 4
 NEURONS_PER_OUTPUT = 8
 DEFAULT_NUM_NEURONS = (

@@ -171,10 +171,8 @@ def _save_generation_plot(
     parent_ages: list[int],
     offspring_fitnesses: list[float],
     random_fitnesses: list[float],
-    offspring_modality: list[float],
     offspring_activity: list[float],
     offspring_diversity: list[float],
-    random_modality: list[float],
     random_activity: list[float],
     random_diversity: list[float],
     gen: int,
@@ -250,11 +248,9 @@ def _save_generation_plot(
             zorder=2,
         )
 
-    # Median lines for offspring and randoms (fitness, modality, activity)
-    # Colors: fitness=solid, modality=dashed, activity=dotted
+    # Median lines for offspring and randoms (fitness, activity, diversity)
     if n_offspring > 0:
         offspring_fit_med = np.median(offspring_fitnesses)
-        offspring_mod_med = np.median(offspring_modality) if offspring_modality else 0
         offspring_act_med = np.median(offspring_activity) if offspring_activity else 0
         offspring_div_med = np.median(offspring_diversity) if offspring_diversity else 0
         # Fitness - solid blue
@@ -266,17 +262,6 @@ def _save_generation_plot(
             linestyles="-",
             linewidth=2,
             alpha=0.9,
-            zorder=3,
-        )
-        # Modality - solid purple
-        ax.hlines(
-            offspring_mod_med,
-            0.35,
-            0.6,
-            colors="#9b59b6",
-            linestyles="-",
-            linewidth=1.5,
-            alpha=0.8,
             zorder=3,
         )
         # Activity - solid green
@@ -304,7 +289,6 @@ def _save_generation_plot(
 
     if n_randoms > 0:
         random_fit_med = np.median(random_fitnesses)
-        random_mod_med = np.median(random_modality) if random_modality else 0
         random_act_med = np.median(random_activity) if random_activity else 0
         random_div_med = np.median(random_diversity) if random_diversity else 0
         # Fitness - solid red
@@ -316,17 +300,6 @@ def _save_generation_plot(
             linestyles="-",
             linewidth=2,
             alpha=0.9,
-            zorder=3,
-        )
-        # Modality - solid purple
-        ax.hlines(
-            random_mod_med,
-            0.7,
-            0.95,
-            colors="#9b59b6",
-            linestyles="-",
-            linewidth=1.5,
-            alpha=0.8,
             zorder=3,
         )
         # Activity - solid green
@@ -353,15 +326,6 @@ def _save_generation_plot(
         )
 
     # Legend entries for median lines
-    ax.hlines(
-        [],
-        [],
-        [],
-        colors="#9b59b6",
-        linestyles="-",
-        linewidth=1.5,
-        label="Modality median",
-    )
     ax.hlines(
         [],
         [],
@@ -974,7 +938,6 @@ class GenerationStats:
     # Population diversity
     unique_lineages: int = 0  # unique parent IDs among surviving parents
     # Best individual's evaluation metrics
-    best_modal_consistency: float = 0.0
     best_activity: float = 0.0
     best_diversity: float = 0.0
     best_note_count: int = 0
@@ -1267,7 +1230,7 @@ def run_evolution(
         best_result = results[0]
         print(
             f"Initial best: {best_result.fitness:.4f} | "
-            f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} div:{best_result.diversity:.2f} | "
+            f"act:{best_result.activity:.2f} div:{best_result.diversity:.2f} | "
             f"notes:{best_result.note_count}"
         )
 
@@ -1455,11 +1418,9 @@ def run_evolution(
         parent_from_random = [ind.parent_id is None for ind in population]
         parent_ages = [current_gen - ind.generation_born for ind in population]
         offspring_fitnesses_for_plot = [r.fitness for r in offspring_results]
-        offspring_modality_for_plot = [r.modal_consistency for r in offspring_results]
         offspring_activity_for_plot = [r.activity for r in offspring_results]
         offspring_diversity_for_plot = [r.diversity for r in offspring_results]
         random_fitnesses_for_plot = [r.fitness for r in random_results]
-        random_modality_for_plot = [r.modal_consistency for r in random_results]
         random_activity_for_plot = [r.activity for r in random_results]
         random_diversity_for_plot = [r.diversity for r in random_results]
 
@@ -1534,7 +1495,6 @@ def run_evolution(
             best_age=current_gen - best_ind.generation_born,
             num_culled=num_culled,
             unique_lineages=unique_lineages,
-            best_modal_consistency=best_result.modal_consistency,
             best_activity=best_result.activity,
             best_diversity=best_result.diversity,
             best_note_count=best_result.note_count,
@@ -1589,7 +1549,7 @@ def run_evolution(
         tqdm.write(
             f"Gen {current_gen:3d} | "
             f"Best: {stats.best_fitness:.4f} | "
-            f"modal:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} div:{best_result.diversity:.2f} | "
+            f"act:{best_result.activity:.2f} div:{best_result.diversity:.2f} | "
             f"notes:{best_result.note_count:3d} | "
             f"[{survival_str}] | "
             f"age:{stats.best_age:2d}{species_str} | "
@@ -1603,10 +1563,8 @@ def run_evolution(
             parent_ages=parent_ages,
             offspring_fitnesses=offspring_fitnesses_for_plot,
             random_fitnesses=random_fitnesses_for_plot,
-            offspring_modality=offspring_modality_for_plot,
             offspring_activity=offspring_activity_for_plot,
             offspring_diversity=offspring_diversity_for_plot,
-            random_modality=random_modality_for_plot,
             random_activity=random_activity_for_plot,
             random_diversity=random_diversity_for_plot,
             gen=current_gen,
@@ -1710,7 +1668,6 @@ def plot_evolution_history(
     best_fitness = [s.best_fitness for s in history]
     mean_fitness = [s.mean_fitness for s in history]
     std_fitness = [s.std_fitness for s in history]
-    modal_consistency = [s.best_modal_consistency for s in history]
     activity = [s.best_activity for s in history]
     diversity = [s.best_diversity for s in history]
 
@@ -1736,18 +1693,9 @@ def plot_evolution_history(
     ax.legend()
     ax.grid(True, alpha=0.3)
 
-    # Top right: Modality, Activity, Diversity, and Fitness over generations
+    # Top right: Activity, Diversity, and Fitness over generations
     ax = fig.add_subplot(gs[0, 1])
     ax.plot(generations, best_fitness, "b-", linewidth=2, label="Fitness", alpha=0.9)
-    ax.plot(
-        generations,
-        modal_consistency,
-        "-",
-        color="#9b59b6",
-        linewidth=2,
-        label="Modality",
-        alpha=0.8,
-    )
     ax.plot(
         generations,
         activity,
@@ -1902,17 +1850,22 @@ def create_pitch_class_mapper(
     min_threshold: float = 0.3,
 ) -> Callable[..., str]:
     """
-    Create a mapper for pitch-class encoding (original 12-output scheme).
+    Create a mapper for In-Sen pentatonic scale (5-output scheme).
 
-    Each of 12 outputs per voice maps to a chromatic pitch class.
+    Each of 5 outputs per voice maps to a pitch in the In-Sen scale:
+    In-Sen: C, Db, F, G, Bb (semitones: 0, 1, 5, 7, 10)
+
     Uses argmax: only the highest output per voice per timestep triggers a note,
     and only if it exceeds min_threshold.
 
     Args:
-        base_notes: Base MIDI note per voice
+        base_notes: Base MIDI note per voice (C in each octave)
         min_threshold: Minimum output value for argmax winner to trigger note
     """
     from utils_sonic import save_argmax_outputs_as_midi
+
+    # In-Sen scale intervals from root
+    in_sen_intervals = [0, 1, 5, 7, 10]  # C, Db, F, G, Bb
 
     def mapper(output_history: np.ndarray, filename: str, tempo: int) -> str:
         save_argmax_outputs_as_midi(
@@ -1921,6 +1874,7 @@ def create_pitch_class_mapper(
             tempo=tempo,
             min_threshold=min_threshold,
             base_notes=base_notes,
+            pitch_intervals=in_sen_intervals,
         )
         return filename
 
@@ -1996,7 +1950,7 @@ def resume_evolution(
 def get_n_outputs_for_encoding(encoding: str) -> int:
     """Get n_outputs_per_readout for encoding type."""
     if encoding == "pitch":
-        return 12
+        return 5  # In-Sen pentatonic: C, Db, F, G, Bb
     elif encoding == "motion":
         return 7  # 6 motion bits + 1 velocity gate
     else:

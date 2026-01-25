@@ -29,23 +29,21 @@ SCALES = {
 class BasicMetrics:
     """Container for basic evaluation metrics."""
 
-    modal_consistency: float  # 0-1, how well notes fit a scale
-    best_scale: str  # which scale fits best
-    best_root: int  # root of best-fitting scale (0=C)
+    modal_consistency: float  # 0-1, kept for compatibility but always 0
+    best_scale: str  # kept for compatibility
+    best_root: int  # kept for compatibility
     activity: float  # 0-1, based on note density
     note_density: float  # notes per beat
     note_count: int  # raw number of notes
     diversity: float  # 0-1, pitch variety + anti-repetition
     pitch_entropy: float  # 0-1, normalized entropy of pitch classes used
     repetition_score: float  # 0-1, penalty for repeated n-grams (1 = no repetition)
-    composite_score: float  # weighted combination
+    composite_score: float  # activity * diversity (modality removed)
 
     def __str__(self) -> str:
-        root_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
         return (
             f"BasicMetrics(\n"
             f"  composite: {self.composite_score:.3f}\n"
-            f"  modal: {self.modal_consistency:.3f} ({root_names[self.best_root]} {self.best_scale})\n"
             f"  activity: {self.activity:.3f} ({self.note_count} notes, {self.note_density:.2f}/beat)\n"
             f"  diversity: {self.diversity:.3f} (entropy={self.pitch_entropy:.3f}, rep={self.repetition_score:.3f})\n"
             f")"
@@ -54,11 +52,11 @@ class BasicMetrics:
 
 class BasicAnalyzer:
     """
-    Simple analyzer focused on modal consistency, activity, and diversity.
+    Simple analyzer focused on activity and diversity.
 
-    Composite score is multiplicative: modal * activity * diversity
-    This ensures all three must be satisfied - modality/diversity are
-    meaningless without sufficient activity.
+    Composite score is multiplicative: activity * diversity
+    This ensures both must be satisfied - diversity is meaningless
+    without sufficient activity.
     """
 
     def __init__(
@@ -350,24 +348,21 @@ class BasicAnalyzer:
                 composite_score=0.0,
             )
 
-        pitch_classes = [n["pitch"] % 12 for n in notes]
-
         # Compute metrics
-        modal, best_scale, best_root = self.compute_modal_consistency(pitch_classes)
         activity, note_density = self.compute_activity(
             notes, duration_ticks, ticks_per_beat
         )
         # Per-voice diversity - each voice must individually be diverse
         diversity, pitch_entropy, repetition_score = self.compute_diversity(notes)
 
-        # Composite: multiplicative - all three must be satisfied
-        # Any zero kills the score; modality/diversity meaningless without activity
-        composite = modal * activity * diversity
+        # Composite: multiplicative - both must be satisfied
+        # Any zero kills the score; diversity meaningless without activity
+        composite = activity * diversity
 
         return BasicMetrics(
-            modal_consistency=modal,
-            best_scale=best_scale,
-            best_root=best_root,
+            modal_consistency=0.0,  # Removed - using pentatonic scale instead
+            best_scale="pentatonic",
+            best_root=0,
             activity=activity,
             note_density=note_density,
             note_count=len(notes),
