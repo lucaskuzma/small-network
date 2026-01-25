@@ -510,19 +510,23 @@ def compute_pitchiness(audio: np.ndarray, min_lag: int = 20, max_lag: int = 500)
     return float(np.clip(peak, 0, 1))
 
 
-def evaluate_raw_audio(output_history: np.ndarray) -> tuple[float, float, float]:
+def evaluate_raw_audio(
+    output_history: np.ndarray,
+    stretch_factor: int = 1,
+) -> tuple[float, float, float]:
     """
     Evaluate raw multiply synthesis for tonality and activity.
     
     Args:
         output_history: (T, num_voices, 3) network outputs
+        stretch_factor: Interpolation factor for audio
         
     Returns:
         (fitness, pitchiness, activity)
     """
     from utils_audio import synthesize_raw_multiply
     
-    audio = synthesize_raw_multiply(output_history)
+    audio = synthesize_raw_multiply(output_history, stretch_factor)
     
     # Activity: RMS amplitude
     rms = np.sqrt(np.mean(audio ** 2))

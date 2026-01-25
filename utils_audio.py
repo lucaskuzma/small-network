@@ -165,7 +165,10 @@ def synthesize_oscillators_vectorized(
 # =============================================================================
 
 
-def synthesize_raw_multiply(output_history: np.ndarray) -> np.ndarray:
+def synthesize_raw_multiply(
+    output_history: np.ndarray,
+    stretch_factor: int = 1,
+) -> np.ndarray:
     """
     Convert raw network outputs directly to audio by multiplying channels.
     
@@ -174,9 +177,11 @@ def synthesize_raw_multiply(output_history: np.ndarray) -> np.ndarray:
     
     Args:
         output_history: (T, num_voices, 3) array of outputs in [0, 1]
+        stretch_factor: Interpolate to this many audio samples per network step.
+                       E.g., stretch_factor=8 means 256 network steps → 2048 audio samples.
         
     Returns:
-        audio: (T,) mixed audio signal in [-1, 1]
+        audio: (T * stretch_factor,) mixed audio signal in [-1, 1]
     """
     # Multiply the 3 channels per voice: requires coordination
     per_voice = np.prod(output_history, axis=2)  # (T, num_voices)
@@ -186,6 +191,16 @@ def synthesize_raw_multiply(output_history: np.ndarray) -> np.ndarray:
     
     # Mix voices by averaging
     audio = np.mean(per_voice, axis=1)  # (T,)
+    
+    # Interpolate if stretch_factor > 1
+    if stretch_factor > 1:
+        T = len(audio)
+        new_T = T * stretch_factor
+        audio = np.interp(
+            np.linspace(0, T - 1, new_T),
+            np.arange(T),
+            audio,
+        )
     
     return audio
 

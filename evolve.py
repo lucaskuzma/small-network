@@ -453,7 +453,8 @@ ENCODING_CONFIGS = {
         "n_readouts": 3,
         "n_outputs_per_readout": 3,
         "evaluator": "audio",
-        "sim_steps": 2048,  # 1 second of audio
+        "sim_steps": 2048,  # Network steps (not audio samples)
+        "stretch_factor": 8,  # Audio samples per network step
         "tempo": 60,  # Not used for audio
         "sample_rate": AUDIO_SAMPLE_RATE,
         "output_dir_prefix": "evolve_audio",
@@ -477,6 +478,7 @@ class EvolutionConfig:
     sim_steps: int = 128
     tempo: int = 60  # BPM for MIDI
     sample_rate: Optional[int] = None  # Hz for audio mode
+    stretch_factor: int = 1  # Audio samples per network step (for interpolation)
 
     # Mutation parameters
     weight_mutation_rate: float = 0.1
@@ -948,7 +950,9 @@ def evaluate_genotype(
         from utils_audio import synthesize_raw_multiply, save_wav
 
         try:
-            fitness, pitchiness, act = evaluate_raw_audio(output_history)
+            fitness, pitchiness, act = evaluate_raw_audio(
+                output_history, config.stretch_factor
+            )
             # Map to common fields for logging
             modal_consistency = pitchiness  # pitchiness ~ tonality
             activity = act
@@ -959,7 +963,7 @@ def evaluate_genotype(
             if save_midi and midi_filename:
                 wav_filename = midi_filename.replace(".mid", ".wav")
                 os.makedirs(os.path.dirname(wav_filename), exist_ok=True)
-                audio = synthesize_raw_multiply(output_history)
+                audio = synthesize_raw_multiply(output_history, config.stretch_factor)
                 save_wav(audio, wav_filename, sample_rate=config.sample_rate)
 
         except Exception as e:
@@ -1745,7 +1749,7 @@ def run_evolution(
                     net.tick(step)
                     output_history[step] = net.get_readout_outputs()
 
-                audio = synthesize_raw_multiply(output_history)
+                audio = synthesize_raw_multiply(output_history, config.stretch_factor)
                 save_waveform_plot(
                     audio,
                     graph_path,
@@ -1830,7 +1834,7 @@ def run_evolution(
             net.tick(step)
             output_history[step] = net.get_readout_outputs()
 
-        audio = synthesize_raw_multiply(output_history)
+        audio = synthesize_raw_multiply(output_history, config.stretch_factor)
         save_wav(audio, final_wav_path, sample_rate=config.sample_rate)
         save_waveform_plot(
             audio,
@@ -2140,6 +2144,7 @@ def create_motion_mapper(
 
 def create_audio_mapper(
     sample_rate: int = AUDIO_SAMPLE_RATE,
+    stretch_factor: int = 1,
 ) -> Callable[..., str]:
     """
     Create a mapper for audio encoding using raw output multiplication.
@@ -2149,11 +2154,12 @@ def create_audio_mapper(
 
     Args:
         sample_rate: Audio sample rate in Hz
+        stretch_factor: Interpolation factor for audio
     """
     from utils_audio import synthesize_raw_multiply, save_wav
 
     def mapper(output_history: np.ndarray, filename: str, tempo: int) -> str:
-        audio = synthesize_raw_multiply(output_history)
+        audio = synthesize_raw_multiply(output_history, stretch_factor)
         # Ensure .wav extension
         if not filename.endswith(".wav"):
             filename = filename.replace(".mid", ".wav")
@@ -2249,6 +2255,7 @@ if __name__ == "__main__":
 
         # Fresh run using encoding config
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        stretch = enc_config.get("stretch_factor", 1)
         config = EvolutionConfig(
             generations=args.generations,
             random_seed=42,
@@ -2258,6 +2265,7 @@ if __name__ == "__main__":
             sim_steps=enc_config["sim_steps"],
             tempo=enc_config["tempo"],
             sample_rate=enc_config["sample_rate"],
+            stretch_factor=stretch,
             output_dir=f"{enc_config['output_dir_prefix']}/{timestamp}",
         )
 
@@ -2265,9 +2273,12 @@ if __name__ == "__main__":
         print(f"Encoding: {args.encoding} ({n_outputs} outputs × {n_readouts} voices)")
         print(f"Evaluator: {config.evaluator}")
         if args.encoding == "audio":
+            audio_samples = config.sim_steps * config.stretch_factor
+            duration = audio_samples / config.sample_rate
             print(
-                f"Sample rate: {config.sample_rate} Hz, Duration: {config.sim_steps / config.sample_rate:.2f}s"
+                f"Network: {config.sim_steps} steps × {config.stretch_factor} stretch = {audio_samples} samples"
             )
+            print(f"Sample rate: {config.sample_rate} Hz, Duration: {duration:.2f}s")
         np.random.seed(config.random_seed)
 
         initial_population = [
