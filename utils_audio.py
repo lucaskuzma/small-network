@@ -165,6 +165,31 @@ def synthesize_oscillators_vectorized(
 # =============================================================================
 
 
+def synthesize_raw_multiply(output_history: np.ndarray) -> np.ndarray:
+    """
+    Convert raw network outputs directly to audio by multiplying channels.
+    
+    Each voice has 3 outputs. All 3 must be high simultaneously to produce sound.
+    This forces the network to coordinate its outputs.
+    
+    Args:
+        output_history: (T, num_voices, 3) array of outputs in [0, 1]
+        
+    Returns:
+        audio: (T,) mixed audio signal in [-1, 1]
+    """
+    # Multiply the 3 channels per voice: requires coordination
+    per_voice = np.prod(output_history, axis=2)  # (T, num_voices)
+    
+    # Shift from [0, 1] to [-1, 1]
+    per_voice = per_voice * 2 - 1
+    
+    # Mix voices by averaging
+    audio = np.mean(per_voice, axis=1)  # (T,)
+    
+    return audio
+
+
 def save_wav(
     samples: np.ndarray,
     filename: str,

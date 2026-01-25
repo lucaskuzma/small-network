@@ -453,7 +453,7 @@ ENCODING_CONFIGS = {
         "n_readouts": 3,
         "n_outputs_per_readout": 3,
         "evaluator": "audio",
-        "sim_steps": AUDIO_SAMPLE_RATE,  # 1 second of audio
+        "sim_steps": 2048,  # 1 second of audio
         "tempo": 60,  # Not used for audio
         "sample_rate": AUDIO_SAMPLE_RATE,
         "output_dir_prefix": "evolve_audio",
@@ -945,7 +945,7 @@ def evaluate_genotype(
     if config.encoding == "audio":
         # === AUDIO MODE: Direct synthesis and evaluation ===
         from eval_audio import evaluate_audio as eval_audio_fn
-        from utils_audio import synthesize_oscillators_vectorized, save_wav
+        from utils_audio import synthesize_raw_multiply, save_wav
 
         try:
             # Evaluate directly on output_history (no MIDI intermediate)
@@ -962,10 +962,7 @@ def evaluate_genotype(
                 # Replace .mid extension with .wav
                 wav_filename = midi_filename.replace(".mid", ".wav")
                 os.makedirs(os.path.dirname(wav_filename), exist_ok=True)
-                audio, _ = synthesize_oscillators_vectorized(
-                    output_history,
-                    sample_rate=config.sample_rate,
-                )
+                audio = synthesize_raw_multiply(output_history)
                 save_wav(audio, wav_filename, sample_rate=config.sample_rate)
 
         except Exception as e:
@@ -1728,10 +1725,10 @@ def run_evolution(
             graph_path = os.path.join(graph_dir, f"{filename}.png")
 
             if config.encoding == "audio":
-                # Audio mode: save frequency plot and WAV
+                # Audio mode: save waveform and WAV
                 from utils_audio import (
-                    synthesize_oscillators_vectorized,
-                    save_frequency_plot,
+                    synthesize_raw_multiply,
+                    save_waveform_plot,
                     save_wav,
                 )
 
@@ -1753,11 +1750,9 @@ def run_evolution(
                     net.tick(step)
                     output_history[step] = net.get_readout_outputs()
 
-                audio, freqs = synthesize_oscillators_vectorized(
-                    output_history, sample_rate=config.sample_rate
-                )
-                save_frequency_plot(
-                    freqs,
+                audio = synthesize_raw_multiply(output_history)
+                save_waveform_plot(
+                    audio,
                     graph_path,
                     sample_rate=config.sample_rate,
                     title=f"Gen {current_gen} - Fitness {current_best_fitness:.4f}",
@@ -1811,10 +1806,9 @@ def run_evolution(
     if config.encoding == "audio":
         # Audio mode: save WAV and waveform
         from utils_audio import (
-            synthesize_oscillators_vectorized,
+            synthesize_raw_multiply,
             save_wav,
             save_waveform_plot,
-            save_frequency_plot,
         )
 
         audio_dir = os.path.join(config.output_dir, "audio")
@@ -1825,7 +1819,6 @@ def run_evolution(
         filename = f"final_best_{best_ever_fitness:.4f}"
         final_wav_path = os.path.join(audio_dir, f"{filename}.wav")
         final_graph_path = os.path.join(graph_dir, f"{filename}.png")
-        final_freq_path = os.path.join(graph_dir, f"{filename}_freq.png")
 
         # Re-run simulation to get outputs
         net = best_ever_individual.genotype.to_network()
@@ -1842,21 +1835,13 @@ def run_evolution(
             net.tick(step)
             output_history[step] = net.get_readout_outputs()
 
-        audio, freqs = synthesize_oscillators_vectorized(
-            output_history, sample_rate=config.sample_rate
-        )
+        audio = synthesize_raw_multiply(output_history)
         save_wav(audio, final_wav_path, sample_rate=config.sample_rate)
         save_waveform_plot(
             audio,
             final_graph_path,
             sample_rate=config.sample_rate,
             title=f"Final Best - Fitness {best_ever_fitness:.4f}",
-        )
-        save_frequency_plot(
-            freqs,
-            final_freq_path,
-            sample_rate=config.sample_rate,
-            title=f"Final Best - Voice Frequencies",
         )
         print(f"Final best saved to: {final_wav_path}")
     else:
@@ -2160,37 +2145,24 @@ def create_motion_mapper(
 
 def create_audio_mapper(
     sample_rate: int = AUDIO_SAMPLE_RATE,
-    freq_min: float = 100.0,
-    freq_max: float = 800.0,
 ) -> Callable[..., str]:
     """
-    Create a mapper for audio encoding (3-output scheme: freq, phase, amp).
+    Create a mapper for audio encoding using raw output multiplication.
 
-    Outputs per voice: [frequency, phase_modulation, amplitude]
-    Each voice is a sine oscillator.
+    Each voice has 3 outputs that are multiplied together.
+    All 3 must be high simultaneously to produce sound.
 
     Args:
         sample_rate: Audio sample rate in Hz
-        freq_min: Minimum frequency when output=0
-        freq_max: Maximum frequency when output=1
-
-    Note: For audio mode, the 'tempo' parameter passed to mapper is actually sample_rate.
     """
-    from utils_audio import synthesize_oscillators_vectorized, save_wav
+    from utils_audio import synthesize_raw_multiply, save_wav
 
     def mapper(output_history: np.ndarray, filename: str, tempo: int) -> str:
-        # In audio mode, tempo is repurposed as sample_rate
-        actual_sample_rate = tempo if tempo > 1000 else sample_rate
-        audio, _ = synthesize_oscillators_vectorized(
-            output_history,
-            sample_rate=actual_sample_rate,
-            freq_min=freq_min,
-            freq_max=freq_max,
-        )
+        audio = synthesize_raw_multiply(output_history)
         # Ensure .wav extension
         if not filename.endswith(".wav"):
             filename = filename.replace(".mid", ".wav")
-        save_wav(audio, filename, sample_rate=actual_sample_rate)
+        save_wav(audio, filename, sample_rate=sample_rate)
         return filename
 
     return mapper
