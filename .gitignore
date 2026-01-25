@@ -16,4 +16,5 @@
 *.m4v
 __pycache__/
 evolve_midi/
+evolve_audio/
 eval_midi/
