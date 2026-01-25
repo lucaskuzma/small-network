@@ -429,15 +429,16 @@ class EvolutionConfig:
     """Configuration for evolution run."""
 
     # Evolution parameters
-    mu: int = 32  # Number of parents to keep
-    num_offspring: int = 160  # Number of mutated offspring per generation
+    mu: int = 24  # Number of parents to keep
+    num_offspring: int = 5 * mu  # Number of mutated offspring per generation
     num_randoms: int = (
-        0  # Number of fresh randoms per generation (mutations proven more effective)
+        mu
+        // 3  # Number of fresh randoms per generation (mutations proven more effective)
     )
     generations: int = 50
 
     # Simulation parameters
-    sim_steps: int = 128
+    sim_steps: int = 256
     tempo: int = 60
 
     # Mutation parameters
@@ -466,7 +467,7 @@ class EvolutionConfig:
     evaluator: str = "basic"
 
     # Speciation: protect diverse solutions from premature elimination
-    use_speciation: bool = True
+    use_speciation: bool = False
     num_species: int = 4  # Target number of species
     species_distance_threshold: float = 0.001  # Genotype distance to be same species
 
@@ -2058,7 +2059,7 @@ if __name__ == "__main__":
         # Fresh run
         config = EvolutionConfig(
             generations=args.generations,
-            random_seed=42,
+            random_seed=44,
             save_every_n_generations=5,
             encoding=args.encoding,
             evaluator=args.eval,
