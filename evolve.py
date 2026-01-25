@@ -396,8 +396,7 @@ class EvolutionConfig:
     mu: int = 24  # Number of parents to keep
     num_offspring: int = 5 * mu  # Number of mutated offspring per generation
     num_randoms: int = (
-        mu
-        // 3  # Number of fresh randoms per generation (mutations proven more effective)
+        0  # Number of fresh randoms per generation (mutations proven more effective)
     )
     generations: int = 50
 
