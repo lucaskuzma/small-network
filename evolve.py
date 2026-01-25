@@ -1249,9 +1249,9 @@ def run_evolution(
     print(f"  Output directory: {config.output_dir}")
     print("-" * 100)
 
-    # Track improvement sources
-    improvements_from_mutation = 0  # Improvements from mutation lineage
-    improvements_from_random = 0  # Improvements from random lineage
+    # Track how many offspring/randoms win parent slots (cumulative)
+    wins_from_mutation = 0  # Offspring that made it into parent pool
+    wins_from_random = 0  # Fresh randoms that made it into parent pool
     last_saved_fitness = 0.0  # Track to avoid duplicate saves
 
     # Track successful mutation params for end-of-run analysis
@@ -1451,6 +1451,16 @@ def run_evolution(
             results = [r for ind, r in sorted_pairs[: config.mu]]
         fitnesses = [r.fitness for r in results]
 
+        # Track IDs of offspring and randoms for win counting
+        offspring_ids = {ind.id for ind in offspring}
+        random_ids = {ind.id for ind in randoms}
+
+        # Count how many offspring/randoms made it into the parent pool this generation
+        gen_wins_mut = sum(1 for ind in population if ind.id in offspring_ids)
+        gen_wins_rnd = sum(1 for ind in population if ind.id in random_ids)
+        wins_from_mutation += gen_wins_mut
+        wins_from_random += gen_wins_rnd
+
         # Compute parent survival visualization: ● = old parent survived, ○ = new offspring
         survival_str = "".join(
             "●" if ind.id in prev_parent_ids else "○" for ind in population
@@ -1507,30 +1517,28 @@ def run_evolution(
         )
         history.append(stats)
 
-        # Track if best improved and from what source
-        best_improved = fitnesses[0] > prev_best_fitness
-        improvement_source = ""
-        if best_improved:
-            new_best = population[0]
-            if new_best.id != prev_best_id:
-                # New individual became best - was it created by mutation or fresh random?
-                # parent_id is None for fresh randoms, set for mutations
-                if new_best.parent_id is None:
-                    improvements_from_random += 1
-                    improvement_source = "RND"
-                else:
-                    improvements_from_mutation += 1
-                    improvement_source = "MUT"
-                    # Record successful mutation params
-                    if new_best.mutation_params is not None:
-                        successful_mutations.append(
-                            SuccessfulMutation(
-                                generation=current_gen,
-                                fitness_before=prev_best_fitness,
-                                fitness_after=fitnesses[0],
-                                params=new_best.mutation_params,
-                            )
+        # Record successful mutations for strategy analysis (when offspring makes it to top)
+        for ind in population:
+            if ind.id in offspring_ids and ind.mutation_params is not None:
+                # Find parent's fitness from previous generation
+                parent_result = next(
+                    (
+                        r
+                        for i, r in zip(combined_pop, combined_results)
+                        if i.id == ind.parent_id
+                    ),
+                    None,
+                )
+                if parent_result and ind.id == population[0].id:
+                    # Only record for new best (strategy analysis)
+                    successful_mutations.append(
+                        SuccessfulMutation(
+                            generation=current_gen,
+                            fitness_before=parent_result.fitness,
+                            fitness_after=results[population.index(ind)].fitness,
+                            params=ind.mutation_params,
                         )
+                    )
 
         # Update best ever
         if fitnesses[0] > best_ever_fitness:
@@ -1541,8 +1549,15 @@ def run_evolution(
         n_parents_from_random = sum(1 for ind in population if ind.parent_id is None)
         n_parents_from_mutation = config.mu - n_parents_from_random
 
+        # Check if there's a new best
+        new_best_str = ""
+        if population[0].id != prev_best_id:
+            if population[0].id in offspring_ids:
+                new_best_str = " [MUT]"
+            elif population[0].id in random_ids:
+                new_best_str = " [RND]"
+
         # Progress output
-        src_str = f" [{improvement_source}]" if improvement_source else ""
         species_str = (
             f" | species:{num_active_species}" if config.use_speciation else ""
         )
@@ -1553,7 +1568,7 @@ def run_evolution(
             f"notes:{best_result.note_count:3d} | "
             f"[{survival_str}] | "
             f"age:{stats.best_age:2d}{species_str} | "
-            f"wins: mut={improvements_from_mutation} rnd={improvements_from_random}{src_str}"
+            f"wins: mut={wins_from_mutation} rnd={wins_from_random} (+{gen_wins_mut}/{gen_wins_rnd}){new_best_str}"
         )
 
         # Save generation plot (for animation)
