@@ -943,23 +943,20 @@ def evaluate_genotype(
     sounding_fraction = 0.0
 
     if config.encoding == "audio":
-        # === AUDIO MODE: Direct synthesis and evaluation ===
-        from eval_audio import evaluate_audio as eval_audio_fn
+        # === AUDIO MODE: Raw multiply synthesis ===
+        from eval_audio import evaluate_raw_audio
         from utils_audio import synthesize_raw_multiply, save_wav
 
         try:
-            # Evaluate directly on output_history (no MIDI intermediate)
-            metrics = eval_audio_fn(output_history)
-            fitness = metrics.composite_score
-            # Map audio metrics to common fields for logging
-            modal_consistency = metrics.consonance  # consonance ~ modality
-            activity = metrics.activity
-            diversity = metrics.independence  # independence ~ diversity
-            sounding_fraction = metrics.sounding_fraction
+            fitness, pitchiness, act = evaluate_raw_audio(output_history)
+            # Map to common fields for logging
+            modal_consistency = pitchiness  # pitchiness ~ tonality
+            activity = act
+            diversity = 0.0  # not used
+            sounding_fraction = act  # reuse activity as sounding indicator
 
             # Save WAV if requested
             if save_midi and midi_filename:
-                # Replace .mid extension with .wav
                 wav_filename = midi_filename.replace(".mid", ".wav")
                 os.makedirs(os.path.dirname(wav_filename), exist_ok=True)
                 audio = synthesize_raw_multiply(output_history)
@@ -1346,8 +1343,7 @@ def run_evolution(
         if config.encoding == "audio":
             print(
                 f"Initial best: {best_result.fitness:.4f} | "
-                f"cons:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} indep:{best_result.diversity:.2f} | "
-                f"sounding:{best_result.sounding_fraction:.1%}"
+                f"pitch:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f}"
             )
         else:
             print(
@@ -1676,8 +1672,7 @@ def run_evolution(
             tqdm.write(
                 f"Gen {current_gen:3d} | "
                 f"Best: {stats.best_fitness:.4f} | "
-                f"cons:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} indep:{best_result.diversity:.2f} | "
-                f"sounding:{best_result.sounding_fraction:.1%} | "
+                f"pitch:{best_result.modal_consistency:.2f} act:{best_result.activity:.2f} | "
                 f"[{survival_str}] | "
                 f"age:{stats.best_age:2d}{species_str} | "
                 f"wins: mut={improvements_from_mutation} rnd={improvements_from_random}{src_str}"

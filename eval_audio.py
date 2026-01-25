@@ -459,9 +459,83 @@ def evaluate_audio(
     output_history: np.ndarray,
     **kwargs,
 ) -> AudioMetrics:
-    """Quick evaluation of network outputs."""
+    """Quick evaluation of network outputs (oscillator mode)."""
     analyzer = AudioAnalyzer(**kwargs)
     return analyzer.analyze(output_history)
+
+
+def compute_pitchiness(audio: np.ndarray, min_lag: int = 20, max_lag: int = 500) -> float:
+    """
+    Measure how tonal/pitched the audio is using autocorrelation.
+    
+    Periodic signals have strong autocorrelation peaks at the period.
+    Noise has weak autocorrelation.
+    
+    Args:
+        audio: (T,) audio samples
+        min_lag: Minimum lag to search (excludes very high frequencies)
+        max_lag: Maximum lag to search (excludes very low frequencies)
+        
+    Returns:
+        Pitchiness score 0-1 (1 = strongly periodic/tonal)
+    """
+    if len(audio) < max_lag * 2:
+        max_lag = len(audio) // 2
+    
+    if max_lag <= min_lag:
+        return 0.0
+    
+    # Normalize audio
+    audio = audio - np.mean(audio)
+    if np.std(audio) < 1e-6:
+        return 0.0
+    audio = audio / np.std(audio)
+    
+    # Compute autocorrelation for lags in range
+    n = len(audio)
+    autocorr = np.correlate(audio, audio, mode='full')[n-1:]  # Positive lags only
+    
+    # Normalize by zero-lag (which equals variance = 1 after normalization)
+    autocorr = autocorr / autocorr[0]
+    
+    # Find peak in the valid lag range
+    valid_autocorr = autocorr[min_lag:max_lag]
+    if len(valid_autocorr) == 0:
+        return 0.0
+    
+    peak = np.max(valid_autocorr)
+    
+    # Peak > 0.5 is quite tonal, > 0.8 is very tonal
+    # Clamp to [0, 1]
+    return float(np.clip(peak, 0, 1))
+
+
+def evaluate_raw_audio(output_history: np.ndarray) -> tuple[float, float, float]:
+    """
+    Evaluate raw multiply synthesis for tonality and activity.
+    
+    Args:
+        output_history: (T, num_voices, 3) network outputs
+        
+    Returns:
+        (fitness, pitchiness, activity)
+    """
+    from utils_audio import synthesize_raw_multiply
+    
+    audio = synthesize_raw_multiply(output_history)
+    
+    # Activity: RMS amplitude
+    rms = np.sqrt(np.mean(audio ** 2))
+    # Target RMS around 0.2, saturate at 0.4
+    activity = min(1.0, rms / 0.2)
+    
+    # Pitchiness: autocorrelation
+    pitchiness = compute_pitchiness(audio)
+    
+    # Fitness: product
+    fitness = pitchiness * activity
+    
+    return fitness, pitchiness, activity
 
 
 # =============================================================================
