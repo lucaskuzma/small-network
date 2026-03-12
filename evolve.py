@@ -401,7 +401,7 @@ class EvolutionConfig:
     generations: int = 50
 
     # Simulation parameters
-    sim_steps: int = 256
+    sim_steps: int = 72 * 4
     tempo: int = 60
 
     # Mutation parameters
@@ -1272,7 +1272,7 @@ def run_evolution(
         prev_best_fitness = results[0].fitness if results else 0.0
 
         # Generate offspring: 3/5 gaussian mutation (with annealing), 2/5 differential
-        offspring = []      # gaussian mutation offspring
+        offspring = []  # gaussian mutation offspring
         differentials = []  # differential offspring
         parent_idx = 0
 
@@ -1427,7 +1427,10 @@ def run_evolution(
             offspring_results.append(evaluate_genotype(ind.genotype, config))
 
         for ind in tqdm(
-            differentials, desc=f"Gen {current_gen:3d} differential", unit="ind", leave=False
+            differentials,
+            desc=f"Gen {current_gen:3d} differential",
+            unit="ind",
+            leave=False,
         ):
             differential_results.append(evaluate_genotype(ind.genotype, config))
 
@@ -1455,7 +1458,9 @@ def run_evolution(
 
         # Combine parents + gaussian offspring + differential offspring + randoms
         combined_pop = population + offspring + differentials + randoms
-        combined_results = results + offspring_results + differential_results + random_results
+        combined_results = (
+            results + offspring_results + differential_results + random_results
+        )
 
         # Select best μ individuals (with or without speciation)
         num_active_species = 0
@@ -1723,7 +1728,7 @@ def plot_evolution_history(
     activity = [s.best_activity for s in history]
     diversity = [s.best_diversity for s in history]
     wins_mut = [s.gen_wins_mutation for s in history]
-    wins_diff = [getattr(s, 'gen_wins_differential', 0) for s in history]
+    wins_diff = [getattr(s, "gen_wins_differential", 0) for s in history]
     wins_rnd = [s.gen_wins_random for s in history]
 
     # Create figure with 2 rows, 2 columns
@@ -1943,7 +1948,9 @@ def plot_evolution_history(
 # =============================================================================
 
 
-def _create_mapper_for_encoding(encoding: str, scale: str = DEFAULT_SCALE) -> Callable[..., str]:
+def _create_mapper_for_encoding(
+    encoding: str, scale: str = DEFAULT_SCALE
+) -> Callable[..., str]:
     """Create the appropriate mapper for an encoding type."""
     if encoding == "pitch":
         return create_pitch_class_mapper(scale=scale)
@@ -2135,7 +2142,9 @@ if __name__ == "__main__":
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         config.output_dir = f"evolve_midi/{timestamp}_{args.scale}"
 
-        print(f"Scale: {args.scale} {SCALES[args.scale]} ({n_outputs} outputs per voice)")
+        print(
+            f"Scale: {args.scale} {SCALES[args.scale]} ({n_outputs} outputs per voice)"
+        )
         print(f"Evaluator: {args.eval}")
         np.random.seed(config.random_seed)
 
