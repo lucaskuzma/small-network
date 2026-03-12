@@ -406,9 +406,9 @@ class EvolutionConfig:
 
     # Mutation parameters
     weight_mutation_rate: float = 0.1
-    weight_mutation_scale: float = 0.001
+    weight_mutation_scale: float = 0.01
     threshold_mutation_rate: float = 0.1
-    threshold_mutation_scale: float = 0.001
+    threshold_mutation_scale: float = 0.01
     refraction_mutation_rate: float = 0.1
 
     # Annealing parameters: mutation params grow with parent age to escape stagnation
