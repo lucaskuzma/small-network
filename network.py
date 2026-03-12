@@ -236,6 +236,47 @@ class NetworkGenotype:
             refraction_period=new_refraction,
         )
 
+    def differential(
+        self,
+        better: "NetworkGenotype",
+        worse: "NetworkGenotype",
+        F: float = 0.5,
+    ) -> "NetworkGenotype":
+        """Differential mutation: self + F * (better - worse).
+
+        Moves this genotype in the direction from worse toward better.
+        F controls step size (0.5-1.0 typical).
+        """
+        new_network_weights = np.clip(
+            self.network_weights + F * (better.network_weights - worse.network_weights),
+            -1, 1,
+        )
+        np.fill_diagonal(new_network_weights, 0)
+
+        new_output_weights = np.clip(
+            self.output_weights + F * (better.output_weights - worse.output_weights),
+            -1, 1,
+        )
+
+        new_thresholds = np.clip(
+            self.thresholds + F * (better.thresholds - worse.thresholds),
+            0, 1,
+        )
+
+        # Refraction: round the delta, keep in valid range
+        refrac_delta = np.round(F * (better.refraction_period - worse.refraction_period)).astype(int)
+        new_refraction = np.clip(self.refraction_period + refrac_delta, 4, 33).astype(int)
+
+        return NetworkGenotype(
+            num_neurons=self.num_neurons,
+            num_readouts=self.num_readouts,
+            n_outputs_per_readout=self.n_outputs_per_readout,
+            network_weights=new_network_weights,
+            output_weights=new_output_weights,
+            thresholds=new_thresholds,
+            refraction_period=new_refraction,
+        )
+
     def crossover(self, other: "NetworkGenotype") -> "NetworkGenotype":
         """Uniform crossover: randomly pick each gene from either parent."""
         assert self.num_neurons == other.num_neurons

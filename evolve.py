@@ -949,9 +949,10 @@ class GenerationStats:
     # Species counts (how many parents in each species, if speciation enabled)
     species_counts: dict = field(default_factory=dict)  # species_id -> count in top μ
     num_species: int = 0  # number of active species
-    # Per-generation wins (offspring/randoms that made it into parent pool)
+    # Per-generation wins (offspring/randoms/differential that made it into parent pool)
     gen_wins_mutation: int = 0
     gen_wins_random: int = 0
+    gen_wins_differential: int = 0
 
 
 @dataclass
@@ -1251,9 +1252,10 @@ def run_evolution(
     print(f"  Output directory: {config.output_dir}")
     print("-" * 100)
 
-    # Track how many offspring/randoms win parent slots (cumulative)
-    wins_from_mutation = 0  # Offspring that made it into parent pool
+    # Track how many offspring/randoms/differential win parent slots (cumulative)
+    wins_from_mutation = 0  # Gaussian offspring that made it into parent pool
     wins_from_random = 0  # Fresh randoms that made it into parent pool
+    wins_from_differential = 0  # Differential offspring that made it into parent pool
     last_saved_fitness = 0.0  # Track to avoid duplicate saves
 
     # Track successful mutation params for end-of-run analysis
@@ -1266,32 +1268,28 @@ def run_evolution(
         prev_best_id = population[0].id if population else None
         prev_best_fitness = results[0].fitness if results else 0.0
 
-        # Generate offspring via mutation (round-robin until we hit target)
-        # Split into 5 fifths to test different annealing strategies:
-        #   Q1: NONE       - baseline, no annealing (control group)
-        #   Q2: SCALE_UP   - increase mutation magnitude with age (explore)
-        #   Q3: SCALE_DOWN - decrease mutation magnitude with age (fine-tune)
-        #   Q4: RATE_UP    - mutate more genes with age
-        #   Q5: RATE_DOWN  - preserve more genes with age
-        offspring = []
+        # Generate offspring: 3/5 gaussian mutation (with annealing), 2/5 differential
+        offspring = []      # gaussian mutation offspring
+        differentials = []  # differential offspring
         parent_idx = 0
-        fifth = config.num_offspring // 5
 
-        while len(offspring) < config.num_offspring:
+        n_gaussian = (config.num_offspring * 3) // 5
+        n_differential = config.num_offspring - n_gaussian
+
+        # --- Gaussian mutation offspring (5 fifths with annealing) ---
+        fifth = n_gaussian // 5
+        while len(offspring) < n_gaussian:
             parent = population[parent_idx % len(population)]
             parent_age = current_gen - parent.generation_born
             idx = len(offspring)
 
-            # Determine annealing strategy based on offspring index (5 fifths)
             if idx < fifth:
-                # Q1: NONE - baseline, no annealing
                 strategy = AnnealStrategy.NONE
                 weight_rate = config.weight_mutation_rate
                 weight_scale = config.weight_mutation_scale
                 threshold_rate = config.threshold_mutation_rate
                 threshold_scale = config.threshold_mutation_scale
             elif idx < 2 * fifth:
-                # Q2: SCALE_UP - increase mutation magnitude with age
                 strategy = AnnealStrategy.SCALE_UP
                 weight_scale = compute_annealed_value(
                     config.weight_mutation_scale,
@@ -1310,7 +1308,6 @@ def run_evolution(
                 weight_rate = config.weight_mutation_rate
                 threshold_rate = config.threshold_mutation_rate
             elif idx < 3 * fifth:
-                # Q3: SCALE_DOWN - decrease mutation magnitude with age (fine-tune)
                 strategy = AnnealStrategy.SCALE_DOWN
                 weight_scale = compute_annealed_value(
                     config.weight_mutation_scale,
@@ -1329,7 +1326,6 @@ def run_evolution(
                 weight_rate = config.weight_mutation_rate
                 threshold_rate = config.threshold_mutation_rate
             elif idx < 4 * fifth:
-                # Q4: RATE_UP - mutate more genes with age
                 strategy = AnnealStrategy.RATE_UP
                 weight_rate = compute_annealed_value(
                     config.weight_mutation_rate,
@@ -1345,13 +1341,11 @@ def run_evolution(
                     config.anneal_max_multiplier,
                     increase=True,
                 )
-                # Cap rates at 1.0 (they're probabilities)
                 weight_rate = min(weight_rate, 1.0)
                 threshold_rate = min(threshold_rate, 1.0)
                 weight_scale = config.weight_mutation_scale
                 threshold_scale = config.threshold_mutation_scale
             else:
-                # Q5: RATE_DOWN - preserve more genes with age
                 strategy = AnnealStrategy.RATE_DOWN
                 weight_rate = compute_annealed_value(
                     config.weight_mutation_rate,
@@ -1382,6 +1376,30 @@ def run_evolution(
             offspring.append(child)
             parent_idx += 1
 
+        # --- Differential offspring (2/5) ---
+        # Pick parent as base, then two other parents (a=better, b=worse) for the delta
+        for _ in range(n_differential):
+            base = population[parent_idx % len(population)]
+            # Pick two distinct other parents
+            others = np.random.choice(len(population), size=2, replace=False)
+            a_idx, b_idx = others
+            a_result, b_result = results[a_idx], results[b_idx]
+            # Ensure a is the better one
+            if b_result.fitness > a_result.fitness:
+                a_idx, b_idx = b_idx, a_idx
+            better = population[a_idx].genotype
+            worse = population[b_idx].genotype
+
+            child_genotype = base.genotype.differential(better, worse, F=0.7)
+            child = Individual(
+                genotype=child_genotype,
+                parent_id=base.id,
+                generation_born=current_gen,
+                root_id=base.root_id,
+            )
+            differentials.append(child)
+            parent_idx += 1
+
         # Generate fresh randoms (parent_id=None by default marks them as random)
         randoms = []
         for _ in range(config.num_randoms):
@@ -1395,17 +1413,21 @@ def run_evolution(
             )
             randoms.append(fresh)
 
-        # Evaluate offspring and randoms separately
+        # Evaluate offspring, differentials, and randoms
         offspring_results = []
+        differential_results = []
         random_results = []
 
-        # Evaluate offspring
         for ind in tqdm(
-            offspring, desc=f"Gen {current_gen:3d} offspring", unit="ind", leave=False
+            offspring, desc=f"Gen {current_gen:3d} gaussian", unit="ind", leave=False
         ):
             offspring_results.append(evaluate_genotype(ind.genotype, config))
 
-        # Evaluate randoms
+        for ind in tqdm(
+            differentials, desc=f"Gen {current_gen:3d} differential", unit="ind", leave=False
+        ):
+            differential_results.append(evaluate_genotype(ind.genotype, config))
+
         for ind in tqdm(
             randoms, desc=f"Gen {current_gen:3d} randoms", unit="ind", leave=False
         ):
@@ -1419,16 +1441,18 @@ def run_evolution(
         # parent_id is None means it was a fresh random, not None means it was a mutation
         parent_from_random = [ind.parent_id is None for ind in population]
         parent_ages = [current_gen - ind.generation_born for ind in population]
-        offspring_fitnesses_for_plot = [r.fitness for r in offspring_results]
-        offspring_activity_for_plot = [r.activity for r in offspring_results]
-        offspring_diversity_for_plot = [r.diversity for r in offspring_results]
+        # Merge gaussian + differential for offspring plot data
+        all_offspring_results = offspring_results + differential_results
+        offspring_fitnesses_for_plot = [r.fitness for r in all_offspring_results]
+        offspring_activity_for_plot = [r.activity for r in all_offspring_results]
+        offspring_diversity_for_plot = [r.diversity for r in all_offspring_results]
         random_fitnesses_for_plot = [r.fitness for r in random_results]
         random_activity_for_plot = [r.activity for r in random_results]
         random_diversity_for_plot = [r.diversity for r in random_results]
 
-        # Combine parents + offspring + randoms
-        combined_pop = population + offspring + randoms
-        combined_results = results + offspring_results + random_results
+        # Combine parents + gaussian offspring + differential offspring + randoms
+        combined_pop = population + offspring + differentials + randoms
+        combined_results = results + offspring_results + differential_results + random_results
 
         # Select best μ individuals (with or without speciation)
         num_active_species = 0
@@ -1453,14 +1477,17 @@ def run_evolution(
             results = [r for ind, r in sorted_pairs[: config.mu]]
         fitnesses = [r.fitness for r in results]
 
-        # Track IDs of offspring and randoms for win counting
+        # Track IDs of offspring, differentials, and randoms for win counting
         offspring_ids = {ind.id for ind in offspring}
+        differential_ids = {ind.id for ind in differentials}
         random_ids = {ind.id for ind in randoms}
 
-        # Count how many offspring/randoms made it into the parent pool this generation
+        # Count how many of each type made it into the parent pool this generation
         gen_wins_mut = sum(1 for ind in population if ind.id in offspring_ids)
+        gen_wins_diff = sum(1 for ind in population if ind.id in differential_ids)
         gen_wins_rnd = sum(1 for ind in population if ind.id in random_ids)
         wins_from_mutation += gen_wins_mut
+        wins_from_differential += gen_wins_diff
         wins_from_random += gen_wins_rnd
 
         # Compute parent survival visualization: ● = old parent survived, ○ = new offspring
@@ -1518,6 +1545,7 @@ def run_evolution(
             num_species=num_active_species,
             gen_wins_mutation=gen_wins_mut,
             gen_wins_random=gen_wins_rnd,
+            gen_wins_differential=gen_wins_diff,
         )
         history.append(stats)
 
@@ -1558,6 +1586,8 @@ def run_evolution(
         if population[0].id != prev_best_id:
             if population[0].id in offspring_ids:
                 new_best_str = " [MUT]"
+            elif population[0].id in differential_ids:
+                new_best_str = " [DIFF]"
             elif population[0].id in random_ids:
                 new_best_str = " [RND]"
 
@@ -1572,7 +1602,7 @@ def run_evolution(
             f"notes:{best_result.note_count:3d} | "
             f"[{survival_str}] | "
             f"age:{stats.best_age:2d}{species_str} | "
-            f"wins: mut={wins_from_mutation} rnd={wins_from_random} (+{gen_wins_mut}/{gen_wins_rnd}){new_best_str}"
+            f"wins: mut={wins_from_mutation} diff={wins_from_differential} rnd={wins_from_random} (+{gen_wins_mut}/{gen_wins_diff}/{gen_wins_rnd}){new_best_str}"
         )
 
         # Save generation plot (for animation)
@@ -1690,6 +1720,7 @@ def plot_evolution_history(
     activity = [s.best_activity for s in history]
     diversity = [s.best_diversity for s in history]
     wins_mut = [s.gen_wins_mutation for s in history]
+    wins_diff = [getattr(s, 'gen_wins_differential', 0) for s in history]
     wins_rnd = [s.gen_wins_random for s in history]
 
     # Create figure with 2 rows, 2 columns
@@ -1842,26 +1873,35 @@ def plot_evolution_history(
         ax.text(0.5, 0.5, "No lineage/species data", ha="center", va="center")
         ax.set_title("Population Diversity")
 
-    # Bottom right: Wins over time (offspring/randoms elected to parent pool)
+    # Bottom right: Wins over time (offspring/differentials/randoms elected to parent pool)
     ax = fig.add_subplot(gs[1, 1])
 
     # Cumulative wins
     cumulative_mut = np.cumsum(wins_mut)
+    cumulative_diff = np.cumsum(wins_diff)
     cumulative_rnd = np.cumsum(wins_rnd)
 
-    # Plot cumulative wins as area chart
+    # Stacked area chart
     ax.fill_between(
         generations,
         0,
         cumulative_mut,
         color="#3498db",
         alpha=0.7,
-        label="Mutations",
+        label="Gaussian",
     )
     ax.fill_between(
         generations,
         cumulative_mut,
-        cumulative_mut + cumulative_rnd,
+        cumulative_mut + cumulative_diff,
+        color="#27ae60",
+        alpha=0.7,
+        label="Differential",
+    )
+    ax.fill_between(
+        generations,
+        cumulative_mut + cumulative_diff,
+        cumulative_mut + cumulative_diff + cumulative_rnd,
         color="#e74c3c",
         alpha=0.7,
         label="Randoms",
@@ -1878,7 +1918,7 @@ def plot_evolution_history(
     ax.text(
         0.98,
         0.02,
-        f"Total: {cumulative_mut[-1]} mut, {cumulative_rnd[-1]} rnd",
+        f"Total: {cumulative_mut[-1]} mut, {cumulative_diff[-1]} diff, {cumulative_rnd[-1]} rnd",
         transform=ax.transAxes,
         ha="right",
         va="bottom",
