@@ -2077,6 +2077,12 @@ if __name__ == "__main__":
         default="basic",
         help="Evaluator: 'basic' (modal + activity only) or 'ambient' (full heuristics)",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=44,
+        help="Random seed (default: 44)",
+    )
     args = parser.parse_args()
 
     if args.resume:
@@ -2104,7 +2110,7 @@ if __name__ == "__main__":
 
         config = EvolutionConfig(
             generations=args.generations,
-            random_seed=44,
+            random_seed=args.seed,
             save_every_n_generations=5,
             encoding=args.encoding,
             evaluator=args.eval,
