@@ -7,10 +7,15 @@ import numpy as np
 # =============================================================================
 # Default hyperparameters
 # =============================================================================
-# In-Sen pentatonic scale: C, Db, F, G, Bb
-IN_SEN_SCALE = [0, 1, 5, 7, 10]
+# Japanese pentatonic scales (all 5-note)
+SCALES = {
+    "in-sen":  [0, 1, 5, 7, 10],  # C, Db, F, G, Bb
+    "iwato":   [0, 1, 5, 6, 10],  # C, Db, F, Gb, Bb
+    "kumoi":   [0, 2, 3, 7, 9],   # C, D, Eb, G, A
+}
+DEFAULT_SCALE = "in-sen"
 
-DEFAULT_N_OUTPUTS_PER_READOUT = len(IN_SEN_SCALE)  # 5 for In-Sen
+DEFAULT_N_OUTPUTS_PER_READOUT = len(SCALES[DEFAULT_SCALE])  # 5 for pentatonic
 DEFAULT_NUM_READOUTS = 3
 NEURONS_PER_OUTPUT = 8
 DEFAULT_NUM_NEURONS = (

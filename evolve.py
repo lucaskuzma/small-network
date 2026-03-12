@@ -17,7 +17,7 @@ from typing import Optional, Union
 from tqdm import tqdm
 
 from enum import Enum
-from network import NeuralNetwork, NetworkGenotype, IN_SEN_SCALE
+from network import NeuralNetwork, NetworkGenotype, SCALES, DEFAULT_SCALE
 from eval_ambient import evaluate_ambient
 from eval_basic import evaluate_basic
 from utils_sonic import save_piano_roll_png
@@ -423,10 +423,12 @@ class EvolutionConfig:
     random_seed: Optional[int] = None
 
     # Output encoding - determines how network outputs map to MIDI
-    # "pitch" = 12 chromatic outputs, "motion" = 8 motion outputs
     encoding: str = "pitch"
 
-    # Evaluator: "ambient" (full) or "basic" (just modal + activity)
+    # Scale choice (for pitch encoding)
+    scale: str = DEFAULT_SCALE
+
+    # Evaluator: "ambient" (full) or "basic" (just activity + diversity)
     evaluator: str = "basic"
 
     # Speciation: protect diverse solutions from premature elimination
@@ -441,7 +443,7 @@ class EvolutionConfig:
     def midi_mapper(self) -> Callable[..., str]:
         """Get the MIDI mapper, creating it if needed."""
         if self._midi_mapper is None:
-            self._midi_mapper = _create_mapper_for_encoding(self.encoding)
+            self._midi_mapper = _create_mapper_for_encoding(self.encoding, self.scale)
         return self._midi_mapper
 
     @midi_mapper.setter
@@ -492,6 +494,7 @@ def save_params_txt(config: EvolutionConfig, output_path: str) -> None:
         f"sim_steps = {config.sim_steps}",
         f"tempo = {config.tempo}",
         f"encoding = {config.encoding}",
+        f"scale = {config.scale} {SCALES[config.scale]}",
         f"evaluator = {config.evaluator}",
         f"",
         f"# === Mutation ===",
@@ -1940,10 +1943,10 @@ def plot_evolution_history(
 # =============================================================================
 
 
-def _create_mapper_for_encoding(encoding: str) -> Callable[..., str]:
+def _create_mapper_for_encoding(encoding: str, scale: str = DEFAULT_SCALE) -> Callable[..., str]:
     """Create the appropriate mapper for an encoding type."""
     if encoding == "pitch":
-        return create_pitch_class_mapper()
+        return create_pitch_class_mapper(scale=scale)
     elif encoding == "motion":
         return create_motion_mapper()
     else:
@@ -1951,20 +1954,24 @@ def _create_mapper_for_encoding(encoding: str) -> Callable[..., str]:
 
 
 def create_pitch_class_mapper(
+    scale: str = DEFAULT_SCALE,
     base_notes: list[int] = [48, 60, 72, 84],
     min_threshold: float = 0.3,
 ) -> Callable[..., str]:
     """
-    Create a mapper for In-Sen pentatonic scale.
+    Create a mapper for a pentatonic scale.
 
-    Uses IN_SEN_SCALE from network.py as the single source of truth.
+    Looks up intervals from SCALES dict in network.py.
     Each output maps to a pitch in the scale via argmax selection.
 
     Args:
+        scale: Scale name (key in SCALES dict)
         base_notes: Base MIDI note per voice (C in each octave)
         min_threshold: Minimum output value for argmax winner to trigger note
     """
     from utils_sonic import save_argmax_outputs_as_midi
+
+    pitch_intervals = SCALES[scale]
 
     def mapper(output_history: np.ndarray, filename: str, tempo: int) -> str:
         save_argmax_outputs_as_midi(
@@ -1973,7 +1980,7 @@ def create_pitch_class_mapper(
             tempo=tempo,
             min_threshold=min_threshold,
             base_notes=base_notes,
-            pitch_intervals=IN_SEN_SCALE,
+            pitch_intervals=pitch_intervals,
         )
         return filename
 
@@ -2078,6 +2085,13 @@ if __name__ == "__main__":
         help="Evaluator: 'basic' (modal + activity only) or 'ambient' (full heuristics)",
     )
     parser.add_argument(
+        "--scale",
+        type=str,
+        choices=list(SCALES.keys()),
+        default=DEFAULT_SCALE,
+        help=f"Pentatonic scale (default: {DEFAULT_SCALE})",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=44,
@@ -2090,9 +2104,11 @@ if __name__ == "__main__":
         checkpoint = Checkpoint.load(args.resume)
         config = checkpoint.config
 
-        # Handle old checkpoints without encoding/evaluator fields
+        # Handle old checkpoints without newer fields
         if not hasattr(config, "encoding") or config.encoding is None:
             config.encoding = "pitch"
+        if not hasattr(config, "scale") or config.scale is None:
+            config.scale = DEFAULT_SCALE
         if not hasattr(config, "evaluator") or config.evaluator is None:
             config.evaluator = "basic"
 
@@ -2102,24 +2118,24 @@ if __name__ == "__main__":
             additional_generations=args.generations,
         )
     else:
-        # Fresh run - pitch uses defaults (In-Sen scale), motion has its own
         if args.encoding == "motion":
             n_outputs = 7  # motion encoding: 6 motion bits + 1 velocity gate
         else:
-            n_outputs = len(IN_SEN_SCALE)  # pitch encoding uses In-Sen scale
+            n_outputs = len(SCALES[args.scale])
 
         config = EvolutionConfig(
             generations=args.generations,
             random_seed=args.seed,
             save_every_n_generations=5,
             encoding=args.encoding,
+            scale=args.scale,
             evaluator=args.eval,
         )
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        config.output_dir = f"evolve_midi/{timestamp}_{args.encoding}"
+        config.output_dir = f"evolve_midi/{timestamp}_{args.scale}"
 
-        print(f"Encoding: {args.encoding} ({n_outputs} outputs per voice)")
+        print(f"Scale: {args.scale} {SCALES[args.scale]} ({n_outputs} outputs per voice)")
         print(f"Evaluator: {args.eval}")
         np.random.seed(config.random_seed)
 
