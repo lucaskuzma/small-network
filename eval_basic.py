@@ -1,10 +1,10 @@
 """
-Basic music evaluation - just modal consistency and activity.
+Basic music evaluation - activity, diversity, and tonal gravity.
 Walk before run: can we even get a network to play a scale?
 """
 
 import numpy as np
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass
 import mido
 
@@ -25,6 +25,54 @@ SCALES = {
 }
 
 
+# Target transition matrices for Japanese pentatonic scales.
+# Each matrix is 5x5: target_matrix[i][j] = ideal probability of moving
+# from scale degree i to scale degree j (given you move to a *different* note).
+# Diagonal is 0, rows sum to 1.
+# Encodes characteristic melodic motion: semitone pairs are the expressive core.
+TRANSITION_TARGETS: Dict[str, Tuple[List[int], np.ndarray]] = {
+    # In-Sen: C, Db, F, G, Bb — semitone at C<->Db
+    # The C<->Db half-step is the defining gesture. Db->C resolution is strongest.
+    "in-sen": (
+        [0, 1, 5, 7, 10],
+        np.array([
+            #    C     Db    F     G     Bb
+            [0.00, 0.40, 0.25, 0.20, 0.15],  # FROM C:  C->Db semitone tension
+            [0.45, 0.00, 0.25, 0.15, 0.15],  # FROM Db: Db->C resolution
+            [0.20, 0.15, 0.00, 0.35, 0.30],  # FROM F:  F->G stepwise, F->Bb
+            [0.20, 0.10, 0.30, 0.00, 0.40],  # FROM G:  G->Bb stepwise, G->F
+            [0.35, 0.20, 0.20, 0.25, 0.00],  # FROM Bb: Bb->C resolution
+        ]),
+    ),
+    # Iwato: C, Db, F, Gb, Bb — semitones at C<->Db AND F<->Gb
+    # Darkest scale: two semitone poles, tritone C-Gb.
+    "iwato": (
+        [0, 1, 5, 6, 10],
+        np.array([
+            #    C     Db    F     Gb    Bb
+            [0.00, 0.40, 0.20, 0.15, 0.25],  # FROM C:  C->Db semitone
+            [0.45, 0.00, 0.25, 0.10, 0.20],  # FROM Db: Db->C resolution
+            [0.15, 0.10, 0.00, 0.45, 0.30],  # FROM F:  F->Gb semitone
+            [0.15, 0.10, 0.45, 0.00, 0.30],  # FROM Gb: Gb->F resolution
+            [0.35, 0.15, 0.25, 0.25, 0.00],  # FROM Bb: Bb->C, connects both poles
+        ]),
+    ),
+    # Kumoi: C, D, Eb, G, A — semitone at D<->Eb
+    # Warmer scale. C-G fifth is structural, D<->Eb is the color.
+    "kumoi": (
+        [0, 2, 3, 7, 9],
+        np.array([
+            #    C     D     Eb    G     A
+            [0.00, 0.30, 0.15, 0.35, 0.20],  # FROM C:  C->G structural, C->D
+            [0.25, 0.00, 0.40, 0.20, 0.15],  # FROM D:  D->Eb semitone
+            [0.20, 0.45, 0.00, 0.20, 0.15],  # FROM Eb: Eb->D resolution
+            [0.30, 0.15, 0.10, 0.00, 0.45],  # FROM G:  G->A stepwise, G->C
+            [0.25, 0.15, 0.15, 0.45, 0.00],  # FROM A:  A->G stepwise
+        ]),
+    ),
+}
+
+
 @dataclass
 class BasicMetrics:
     """Container for basic evaluation metrics."""
@@ -35,39 +83,66 @@ class BasicMetrics:
     activity: float  # 0-1, based on note density
     note_density: float  # notes per beat
     note_count: int  # raw number of notes
-    diversity: float  # 0-1, pitch variety + anti-repetition
-    pitch_entropy: float  # 0-1, normalized entropy of pitch classes used
+    diversity: float  # 0-1, diagnostic only (not in composite)
+    pitch_entropy: float  # 0-1, diagnostic only (subsumed by tonal_gravity)
     repetition_score: float  # 0-1, penalty for repeated n-grams (1 = no repetition)
-    composite_score: float  # activity * diversity (modality removed)
+    tonal_gravity: float  # 0-1, joint transition distribution match (captures both idiom + variety)
+    composite_score: float  # activity * tonal_gravity * repetition_score
 
     def __str__(self) -> str:
         return (
             f"BasicMetrics(\n"
-            f"  composite: {self.composite_score:.3f}\n"
+            f"  composite: {self.composite_score:.3f} (act * grav * rep)\n"
             f"  activity: {self.activity:.3f} ({self.note_count} notes, {self.note_density:.2f}/beat)\n"
-            f"  diversity: {self.diversity:.3f} (entropy={self.pitch_entropy:.3f}, rep={self.repetition_score:.3f})\n"
+            f"  tonal_gravity: {self.tonal_gravity:.3f}\n"
+            f"  repetition: {self.repetition_score:.3f}\n"
+            f"  diversity: {self.diversity:.3f} (entropy={self.pitch_entropy:.3f}) [diagnostic]\n"
             f")"
         )
 
 
 class BasicAnalyzer:
     """
-    Simple analyzer focused on activity and diversity.
+    Simple analyzer focused on activity, tonal quality, and non-repetition.
 
-    Composite score is multiplicative: activity * diversity
-    This ensures both must be satisfied - diversity is meaningless
-    without sufficient activity.
+    Composite score is multiplicative: activity * tonal_gravity * repetition_score.
+    Tonal gravity uses KL divergence against a target joint transition distribution,
+    unifying pitch variety and melodic idiom into a single metric. Diversity/entropy
+    are still computed for diagnostics but don't affect the composite.
     """
 
     def __init__(
         self,
         target_notes: int = 128,  # Target note count (should match sim_steps from evolve.py)
+        scale: Optional[str] = None,  # Scale name for tonal gravity (e.g. "in-sen")
     ):
         """
         Args:
             target_notes: Target note count for activity=1.0 (typically = sim_steps)
+            scale: Scale name for transition-based tonal gravity. If None or unknown,
+                   tonal gravity defaults to 1.0 (no effect on composite).
         """
         self.target_notes = target_notes
+        self.scale = scale
+
+        target = TRANSITION_TARGETS.get(scale) if scale else None
+        if target is not None:
+            self._scale_degrees = target[0]
+            self._target_matrix = target[1]
+            n = self._target_matrix.shape[0]
+            self._n_transition_types = n * (n - 1)
+            # Joint transition distribution: each row contributes 1/n of all transitions
+            flat = []
+            for i in range(n):
+                for j in range(n):
+                    if i != j:
+                        flat.append(self._target_matrix[i, j] / n)
+            self._target_flat = np.array(flat)
+        else:
+            self._scale_degrees = None
+            self._target_matrix = None
+            self._target_flat = None
+            self._n_transition_types = 0
 
     def load_midi(self, midi_path: str) -> Tuple[List[dict], int, int]:
         """
@@ -322,6 +397,91 @@ class BasicAnalyzer:
 
         return diversity, pitch_entropy, repetition_score
 
+    def _compute_voice_tonal_quality(self, pitch_classes: List[int]) -> float:
+        """
+        Score a single voice against the joint transition distribution.
+
+        Counts all non-self transitions, builds an observed distribution over
+        the 20 possible transition types (5 notes x 4 destinations), smooths it,
+        and compares to the target via KL(target || observed).
+
+        This single metric replaces both pitch entropy and the old per-row gravity:
+        - An oscillator (e.g. C<->Db) concentrates on 2 of 20 transitions,
+          massively diverging from the target -> near-zero score.
+        - A diverse network matching the target idiom -> high score.
+
+        Returns: 0-1 score via exp(-KL). 1.0 = perfect match, decays toward 0.
+        """
+        n = len(self._scale_degrees)
+        pc_to_idx = {pc: i for i, pc in enumerate(self._scale_degrees)}
+
+        observed_counts = np.zeros(self._n_transition_types)
+        for k in range(1, len(pitch_classes)):
+            pc_from = pitch_classes[k - 1]
+            pc_to = pitch_classes[k]
+            if pc_from == pc_to:
+                continue
+            i = pc_to_idx.get(pc_from)
+            j = pc_to_idx.get(pc_to)
+            if i is not None and j is not None:
+                flat_idx = i * (n - 1) + (j if j < i else j - 1)
+                observed_counts[flat_idx] += 1
+
+        total = observed_counts.sum()
+        if total < 8:
+            return 0.0
+
+        # Laplace smoothing so no transition type has zero probability
+        alpha = 1.0
+        observed_flat = (observed_counts + alpha) / (total + self._n_transition_types * alpha)
+
+        # KL(target || observed): heavily penalizes transitions the target
+        # expects but the network never makes (the oscillator failure mode)
+        kl = float(np.sum(self._target_flat * np.log(self._target_flat / observed_flat)))
+
+        return float(np.exp(-kl))
+
+    def compute_tonal_gravity(self, notes: List[dict]) -> float:
+        """
+        Compute tonal quality score per voice, then aggregate.
+
+        Compares each voice's transition distribution against the target joint
+        distribution for the configured scale. This single metric captures both
+        tonal gravity (prefer characteristic transitions) and pitch diversity
+        (use all transition types, not just one pair).
+
+        Returns: 0-1 score (1 = transitions match target idiom perfectly).
+                 Returns 1.0 if no transition target is configured (no penalty).
+        """
+        if self._target_flat is None:
+            return 1.0
+
+        if len(notes) < 2:
+            return 0.0
+
+        from collections import defaultdict
+
+        notes_by_track = defaultdict(list)
+        for note in notes:
+            notes_by_track[note["track"]].append(note)
+
+        voice_scores = []
+        for track_notes in notes_by_track.values():
+            if len(track_notes) < 4:
+                voice_scores.append(0.0)
+                continue
+
+            track_notes = sorted(track_notes, key=lambda x: x["start_tick"])
+            pitch_classes = [n["pitch"] % 12 for n in track_notes]
+
+            score = self._compute_voice_tonal_quality(pitch_classes)
+            voice_scores.append(score)
+
+        if not voice_scores:
+            return 0.0
+
+        return float(np.min(voice_scores))
+
     def analyze(self, midi_path: str) -> BasicMetrics:
         """
         Analyze a MIDI file and return basic metrics.
@@ -345,6 +505,7 @@ class BasicAnalyzer:
                 diversity=0.0,
                 pitch_entropy=0.0,
                 repetition_score=0.0,
+                tonal_gravity=0.0,
                 composite_score=0.0,
             )
 
@@ -352,16 +513,21 @@ class BasicAnalyzer:
         activity, note_density = self.compute_activity(
             notes, duration_ticks, ticks_per_beat
         )
-        # Per-voice diversity - each voice must individually be diverse
+        # Per-voice diversity (diagnostic only — entropy is subsumed by tonal gravity)
         diversity, pitch_entropy, repetition_score = self.compute_diversity(notes)
+        # Per-voice tonal quality via joint transition distribution
+        # Replaces both entropy and old per-row gravity in the composite
+        tonal_gravity = self.compute_tonal_gravity(notes)
 
-        # Composite: multiplicative - both must be satisfied
-        # Any zero kills the score; diversity meaningless without activity
-        composite = activity * diversity
+        # Composite: activity * tonal_gravity * repetition_score
+        # - tonal_gravity captures BOTH tonal idiom AND pitch variety (subsumes entropy)
+        # - repetition_score catches sequential pattern monotony (kept from diversity)
+        # - diversity/entropy computed above are diagnostic only
+        composite = activity * tonal_gravity * repetition_score
 
         return BasicMetrics(
             modal_consistency=0.0,  # Removed - using pentatonic scale instead
-            best_scale="pentatonic",
+            best_scale=self.scale or "pentatonic",
             best_root=0,
             activity=activity,
             note_density=note_density,
@@ -369,6 +535,7 @@ class BasicAnalyzer:
             diversity=diversity,
             pitch_entropy=pitch_entropy,
             repetition_score=repetition_score,
+            tonal_gravity=tonal_gravity,
             composite_score=composite,
         )
 

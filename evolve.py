@@ -776,7 +776,9 @@ class EvalResult:
     note_density: float = 0.0  # notes per beat
     modal_consistency: float = 0.0  # 0-1, how well notes fit a scale
     activity: float = 0.0  # 0-1, based on note density
-    diversity: float = 0.0  # 0-1, pitch variety + anti-repetition
+    diversity: float = 0.0  # 0-1, diagnostic only (not in composite)
+    tonal_gravity: float = 0.0  # 0-1, joint transition distribution match
+    repetition_score: float = 0.0  # 0-1, n-gram non-repetition
     midi_path: Optional[str] = None
     # Output statistics for debugging activity ceiling
     output_max: float = 0.0  # max output value across all timesteps
@@ -872,15 +874,21 @@ def evaluate_genotype(
     modal_consistency = 0.0
     activity = 0.0
     diversity = 0.0
+    tonal_gravity = 0.0
+    repetition_score = 0.0
     try:
         if config.evaluator == "basic":
-            metrics = evaluate_basic(temp_midi, target_notes=config.sim_steps)
+            metrics = evaluate_basic(
+                temp_midi, target_notes=config.sim_steps, scale=config.scale
+            )
             fitness = metrics.composite_score
             note_count = metrics.note_count
             note_density = metrics.note_density
             modal_consistency = metrics.modal_consistency
             activity = metrics.activity
             diversity = metrics.diversity
+            tonal_gravity = metrics.tonal_gravity
+            repetition_score = metrics.repetition_score
         else:
             # Default to ambient
             metrics = evaluate_ambient(temp_midi)
@@ -889,7 +897,6 @@ def evaluate_genotype(
             note_density = metrics.note_density
             modal_consistency = metrics.modal_consistency
             activity = metrics.activity
-            # ambient evaluator doesn't have diversity yet
     except Exception as e:
         print(f"Evaluation error: {e}")
         fitness = 0.0
@@ -908,6 +915,8 @@ def evaluate_genotype(
         modal_consistency=modal_consistency,
         activity=activity,
         diversity=diversity,
+        tonal_gravity=tonal_gravity,
+        repetition_score=repetition_score,
         midi_path=midi_filename if save_midi else None,
         output_max=output_max,
         output_min=output_min,
@@ -942,6 +951,8 @@ class GenerationStats:
     # Best individual's evaluation metrics
     best_activity: float = 0.0
     best_diversity: float = 0.0
+    best_tonal_gravity: float = 0.0
+    best_repetition_score: float = 0.0
     best_note_count: int = 0
     # Output statistics for debugging activity ceiling
     best_output_max: float = 0.0
@@ -1236,7 +1247,7 @@ def run_evolution(
         best_result = results[0]
         print(
             f"Initial best: {best_result.fitness:.4f} | "
-            f"act:{best_result.activity:.2f} div:{best_result.diversity:.2f} | "
+            f"act:{best_result.activity:.2f} grav:{best_result.tonal_gravity:.2f} rep:{best_result.repetition_score:.2f} | "
             f"notes:{best_result.note_count}"
         )
 
@@ -1544,6 +1555,8 @@ def run_evolution(
             unique_lineages=unique_lineages,
             best_activity=best_result.activity,
             best_diversity=best_result.diversity,
+            best_tonal_gravity=best_result.tonal_gravity,
+            best_repetition_score=best_result.repetition_score,
             best_note_count=best_result.note_count,
             best_output_max=best_result.output_max,
             mean_output_max=np.mean(all_output_max),
@@ -1606,7 +1619,7 @@ def run_evolution(
         tqdm.write(
             f"Gen {current_gen:3d} | "
             f"Best: {stats.best_fitness:.4f} | "
-            f"act:{best_result.activity:.2f} div:{best_result.diversity:.2f} | "
+            f"act:{best_result.activity:.2f} grav:{best_result.tonal_gravity:.2f} rep:{best_result.repetition_score:.2f} | "
             f"notes:{best_result.note_count:3d} | "
             f"[{survival_str}] | "
             f"age:{stats.best_age:2d}{species_str} | "
@@ -1726,7 +1739,8 @@ def plot_evolution_history(
     mean_fitness = [s.mean_fitness for s in history]
     std_fitness = [s.std_fitness for s in history]
     activity = [s.best_activity for s in history]
-    diversity = [s.best_diversity for s in history]
+    tonal_gravity = [getattr(s, "best_tonal_gravity", 0.0) for s in history]
+    repetition = [getattr(s, "best_repetition_score", 0.0) for s in history]
     wins_mut = [s.gen_wins_mutation for s in history]
     wins_diff = [getattr(s, "gen_wins_differential", 0) for s in history]
     wins_rnd = [s.gen_wins_random for s in history]
@@ -1753,7 +1767,7 @@ def plot_evolution_history(
     ax.legend()
     ax.grid(True, alpha=0.3)
 
-    # Top right: Activity, Diversity, and Fitness over generations
+    # Top right: Composite components over generations
     ax = fig.add_subplot(gs[0, 1])
     ax.plot(generations, best_fitness, "b-", linewidth=2, label="Fitness", alpha=0.9)
     ax.plot(
@@ -1767,11 +1781,20 @@ def plot_evolution_history(
     )
     ax.plot(
         generations,
-        diversity,
+        tonal_gravity,
+        "-",
+        color="#8e44ad",
+        linewidth=2,
+        label="Tonal Gravity",
+        alpha=0.8,
+    )
+    ax.plot(
+        generations,
+        repetition,
         "-",
         color="#e67e22",
         linewidth=2,
-        label="Diversity",
+        label="Repetition",
         alpha=0.8,
     )
     ax.set_xlabel("Generation")
