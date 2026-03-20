@@ -588,18 +588,12 @@ class NeuralNetwork:
         sparsity=0.25,
         scale=0.4,
         num_modules: int = 1,
-        inter_module_factor: float = 1.0,
+        inter_module_factor: Optional[float] = None,
     ):
         """Randomize weights with optional modular block structure.
 
         When num_modules > 1, intra-module connections use `sparsity` and
         inter-module connections use `sparsity * inter_module_factor`.
-
-        Args:
-            sparsity: Fraction of intra-module connections that exist (0-1)
-            scale: Standard deviation of the gaussian distribution
-            num_modules: Number of modules (1 = no modularity)
-            inter_module_factor: Multiplier on sparsity for inter-module connections
         """
         N = self.state.num_neurons
         self.state.network_weights = np.clip(
@@ -609,6 +603,8 @@ class NeuralNetwork:
         if num_modules <= 1:
             mask = np.random.random((N, N)) < sparsity
         else:
+            if inter_module_factor is None:
+                raise ValueError("inter_module_factor is required when num_modules > 1")
             module_size = N // num_modules
             inter_sparsity = sparsity * inter_module_factor
             mask = np.zeros((N, N))
@@ -702,8 +698,8 @@ class NeuralNetwork:
     ):
         """Randomize output weights, optionally constraining readouts to modules.
 
-        When readout_to_module is provided, readout k can only read from
-        the neurons in module readout_to_module[k].
+        When num_modules > 1, readout_to_module must be provided: readout k
+        can only read from the neurons in module readout_to_module[k].
         """
         N = self.state.num_neurons
         num_out = self.state.num_outputs
@@ -711,6 +707,8 @@ class NeuralNetwork:
         sparsity_mask = np.random.random((N, num_out)) < sparsity
         self.state.output_weights *= sparsity_mask
 
+        if num_modules > 1 and readout_to_module is None:
+            raise ValueError("readout_to_module is required when num_modules > 1")
         if num_modules > 1 and readout_to_module is not None:
             module_mask = _build_output_mask(
                 N, self.state.num_readouts, self.state.n_outputs_per_readout,
