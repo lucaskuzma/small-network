@@ -830,6 +830,7 @@ class EvalResult:
     diversity: float = 0.0  # 0-1, diagnostic only (not in composite)
     tonal_gravity: float = 0.0  # 0-1, joint transition distribution match
     repetition_score: float = 0.0  # 0-1, n-gram non-repetition
+    metric_gravity: float = 0.0  # 0-1, stable tones on strong beats
     midi_path: Optional[str] = None
     # Output statistics for debugging activity ceiling
     output_max: float = 0.0  # max output value across all timesteps
@@ -948,6 +949,7 @@ def evaluate_genotype(
     diversity = 0.0
     tonal_gravity = 0.0
     repetition_score = 0.0
+    metric_gravity = 0.0
     try:
         if config.evaluator == "basic":
             metrics = evaluate_basic(
@@ -961,6 +963,7 @@ def evaluate_genotype(
             diversity = metrics.diversity
             tonal_gravity = metrics.tonal_gravity
             repetition_score = metrics.repetition_score
+            metric_gravity = metrics.metric_gravity
         else:
             # Default to ambient
             metrics = evaluate_ambient(temp_midi)
@@ -989,6 +992,7 @@ def evaluate_genotype(
         diversity=diversity,
         tonal_gravity=tonal_gravity,
         repetition_score=repetition_score,
+        metric_gravity=metric_gravity,
         midi_path=midi_filename if save_midi else None,
         output_max=output_max,
         output_min=output_min,
@@ -1026,6 +1030,7 @@ class GenerationStats:
     best_diversity: float = 0.0
     best_tonal_gravity: float = 0.0
     best_repetition_score: float = 0.0
+    best_metric_gravity: float = 0.0
     best_note_count: int = 0
     # Output statistics for debugging activity ceiling
     best_output_max: float = 0.0
@@ -1322,7 +1327,7 @@ def run_evolution(
         best_result = results[0]
         print(
             f"Initial best: {best_result.fitness:.4f} | "
-            f"act:{best_result.activity:.2f} grav:{best_result.tonal_gravity:.2f} rep:{best_result.repetition_score:.2f} | "
+            f"act:{best_result.activity:.2f} grav:{best_result.tonal_gravity:.2f} rep:{best_result.repetition_score:.2f} met:{best_result.metric_gravity:.2f} | "
             f"notes:{best_result.note_count}"
         )
 
@@ -1632,6 +1637,7 @@ def run_evolution(
             best_diversity=best_result.diversity,
             best_tonal_gravity=best_result.tonal_gravity,
             best_repetition_score=best_result.repetition_score,
+            best_metric_gravity=best_result.metric_gravity,
             best_note_count=best_result.note_count,
             best_output_max=best_result.output_max,
             mean_output_max=np.mean(all_output_max),
@@ -1695,7 +1701,7 @@ def run_evolution(
         tqdm.write(
             f"Gen {current_gen:3d} | "
             f"Best: {stats.best_fitness:.4f} | "
-            f"act:{best_result.activity:.2f} grav:{best_result.tonal_gravity:.2f} rep:{best_result.repetition_score:.2f} mcor:{best_result.module_correlation:.2f} | "
+            f"act:{best_result.activity:.2f} grav:{best_result.tonal_gravity:.2f} rep:{best_result.repetition_score:.2f} met:{best_result.metric_gravity:.2f} mcor:{best_result.module_correlation:.2f} | "
             f"notes:{best_result.note_count:3d} | "
             f"[{survival_str}] | "
             f"age:{stats.best_age:2d}{species_str} | "
@@ -1834,6 +1840,7 @@ def plot_evolution_history(
     activity = [s.best_activity for s in history]
     tonal_gravity = [getattr(s, "best_tonal_gravity", 0.0) for s in history]
     repetition = [getattr(s, "best_repetition_score", 0.0) for s in history]
+    metric_grav = [getattr(s, "best_metric_gravity", 0.0) for s in history]
     module_corr = [getattr(s, "best_module_correlation", 0.0) for s in history]
     wins_mut = [s.gen_wins_mutation for s in history]
     wins_diff = [getattr(s, "gen_wins_differential", 0) for s in history]
@@ -1889,6 +1896,15 @@ def plot_evolution_history(
         color="#e67e22",
         linewidth=2,
         label="Repetition",
+        alpha=0.8,
+    )
+    ax.plot(
+        generations,
+        metric_grav,
+        "-",
+        color="#2980b9",
+        linewidth=2,
+        label="Metric Grav",
         alpha=0.8,
     )
     ax.plot(

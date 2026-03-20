@@ -73,6 +73,20 @@ TRANSITION_TARGETS: Dict[str, Tuple[List[int], np.ndarray]] = {
 }
 
 
+# Stable tones per scale (pitch classes that serve as metric anchors).
+# Root + fifth where possible; root + fourth for Iwato (no clean fifth).
+STABLE_TONES: Dict[str, set] = {
+    "in-sen": {0, 7},   # C + G (fifth)
+    "iwato":  {0, 5},   # C + F (fourth; Gb is a tritone, not stable)
+    "kumoi":  {0, 7},   # C + G (fifth)
+}
+
+# Fractal metric weight pattern for one 4-beat phrase (16 16th-notes).
+# Each level of binary subdivision adds 1 to positions it hits.
+# Position 0 (the "one") is strongest; odd positions (offbeat 16ths) are 0.
+METRIC_WEIGHTS = np.array([4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0], dtype=float)
+
+
 @dataclass
 class BasicMetrics:
     """Container for basic evaluation metrics."""
@@ -87,14 +101,16 @@ class BasicMetrics:
     pitch_entropy: float  # 0-1, diagnostic only (subsumed by tonal_gravity)
     repetition_score: float  # 0-1, penalty for repeated n-grams (1 = no repetition)
     tonal_gravity: float  # 0-1, joint transition distribution match (captures both idiom + variety)
-    composite_score: float  # activity * tonal_gravity * repetition_score
+    metric_gravity: float  # 0-1, stable tones on strong beats
+    composite_score: float  # activity * tonal_gravity * repetition_score * metric_gravity
 
     def __str__(self) -> str:
         return (
             f"BasicMetrics(\n"
-            f"  composite: {self.composite_score:.3f} (act * grav * rep)\n"
+            f"  composite: {self.composite_score:.3f} (act * grav * rep * met)\n"
             f"  activity: {self.activity:.3f} ({self.note_count} notes, {self.note_density:.2f}/beat)\n"
             f"  tonal_gravity: {self.tonal_gravity:.3f}\n"
+            f"  metric_gravity: {self.metric_gravity:.3f}\n"
             f"  repetition: {self.repetition_score:.3f}\n"
             f"  diversity: {self.diversity:.3f} (entropy={self.pitch_entropy:.3f}) [diagnostic]\n"
             f")"
@@ -105,10 +121,11 @@ class BasicAnalyzer:
     """
     Simple analyzer focused on activity, tonal quality, and non-repetition.
 
-    Composite score is multiplicative: activity * tonal_gravity * repetition_score.
+    Composite score is multiplicative:
+        activity * tonal_gravity * repetition_score * metric_gravity.
     Tonal gravity uses KL divergence against a target joint transition distribution,
-    unifying pitch variety and melodic idiom into a single metric. Diversity/entropy
-    are still computed for diagnostics but don't affect the composite.
+    unifying pitch variety and melodic idiom into a single metric. Metric gravity
+    rewards stable tones (root/fifth) on metrically strong beats.
     """
 
     def __init__(
@@ -124,6 +141,7 @@ class BasicAnalyzer:
         """
         self.target_notes = target_notes
         self.scale = scale
+        self._stable_tones = STABLE_TONES.get(scale) if scale else None
 
         target = TRANSITION_TARGETS.get(scale) if scale else None
         if target is not None:
@@ -482,6 +500,78 @@ class BasicAnalyzer:
 
         return float(np.min(voice_scores))
 
+    def _compute_voice_metric_gravity(
+        self,
+        notes: List[dict],
+        ticks_per_beat: int,
+        target: float = 0.5,
+    ) -> float:
+        """Score a single voice's tendency to play stable tones on strong beats.
+
+        For each note, looks up the fractal metric weight at its position in the
+        16-step cycle.  Computes the weighted fraction of notes on strong beats
+        that are stable tones.
+
+        Uses a peaked score: ramps from 0 at ratio=0 to 1.0 at ratio=target,
+        then gently decays toward 0.5 at ratio=1.0 (all stable is still OK-ish).
+        """
+        if not notes or self._stable_tones is None:
+            return 1.0
+
+        ticks_per_16th = ticks_per_beat // 4
+        weighted_stable = 0.0
+        total_weight = 0.0
+
+        for note in notes:
+            pos = int(note["start_tick"] / ticks_per_16th) % 16
+            w = METRIC_WEIGHTS[pos]
+            if w > 0:
+                total_weight += w
+                if note["pitch"] % 12 in self._stable_tones:
+                    weighted_stable += w
+
+        if total_weight == 0:
+            return 0.0
+
+        ratio = weighted_stable / total_weight
+
+        if ratio <= target:
+            return ratio / target
+        else:
+            return 1.0 - 0.5 * (ratio - target) / (1.0 - target)
+
+    def compute_metric_gravity(
+        self, notes: List[dict], ticks_per_beat: int
+    ) -> float:
+        """Compute metric gravity per voice, then aggregate (min).
+
+        Returns 0-1 (1 = voices tend to play root/fifth on strong beats).
+        Returns 1.0 if no stable tones are configured for this scale.
+        """
+        if self._stable_tones is None:
+            return 1.0
+        if len(notes) < 2:
+            return 0.0
+
+        from collections import defaultdict
+
+        notes_by_track = defaultdict(list)
+        for note in notes:
+            notes_by_track[note["track"]].append(note)
+
+        voice_scores = []
+        for track_notes in notes_by_track.values():
+            if len(track_notes) < 4:
+                voice_scores.append(0.0)
+                continue
+            score = self._compute_voice_metric_gravity(track_notes, ticks_per_beat)
+            voice_scores.append(score)
+
+        if not voice_scores:
+            return 0.0
+
+        return float(np.min(voice_scores))
+
     def analyze(self, midi_path: str) -> BasicMetrics:
         """
         Analyze a MIDI file and return basic metrics.
@@ -506,6 +596,7 @@ class BasicAnalyzer:
                 pitch_entropy=0.0,
                 repetition_score=0.0,
                 tonal_gravity=0.0,
+                metric_gravity=0.0,
                 composite_score=0.0,
             )
 
@@ -516,17 +607,14 @@ class BasicAnalyzer:
         # Per-voice diversity (diagnostic only — entropy is subsumed by tonal gravity)
         diversity, pitch_entropy, repetition_score = self.compute_diversity(notes)
         # Per-voice tonal quality via joint transition distribution
-        # Replaces both entropy and old per-row gravity in the composite
         tonal_gravity = self.compute_tonal_gravity(notes)
+        # Per-voice stable-tone tendency on metrically strong beats
+        metric_gravity = self.compute_metric_gravity(notes, ticks_per_beat)
 
-        # Composite: activity * tonal_gravity * repetition_score
-        # - tonal_gravity captures BOTH tonal idiom AND pitch variety (subsumes entropy)
-        # - repetition_score catches sequential pattern monotony (kept from diversity)
-        # - diversity/entropy computed above are diagnostic only
-        composite = activity * tonal_gravity * repetition_score
+        composite = activity * tonal_gravity * repetition_score * metric_gravity
 
         return BasicMetrics(
-            modal_consistency=0.0,  # Removed - using pentatonic scale instead
+            modal_consistency=0.0,
             best_scale=self.scale or "pentatonic",
             best_root=0,
             activity=activity,
@@ -536,6 +624,7 @@ class BasicAnalyzer:
             pitch_entropy=pitch_entropy,
             repetition_score=repetition_score,
             tonal_gravity=tonal_gravity,
+            metric_gravity=metric_gravity,
             composite_score=composite,
         )
 
