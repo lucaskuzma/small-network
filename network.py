@@ -17,10 +17,12 @@ DEFAULT_SCALE = "in-sen"
 
 DEFAULT_N_OUTPUTS_PER_READOUT = len(SCALES[DEFAULT_SCALE])  # 5 for pentatonic
 DEFAULT_NUM_READOUTS = 3
-NEURONS_PER_OUTPUT = 8
+DEFAULT_NUM_MODULES = 3
+DEFAULT_INTER_MODULE_FACTOR = 0.1
+NEURONS_PER_OUTPUT = 17
 DEFAULT_NUM_NEURONS = (
     DEFAULT_NUM_READOUTS * DEFAULT_N_OUTPUTS_PER_READOUT * NEURONS_PER_OUTPUT
-)
+)  # 255
 
 DEFAULT_ACTIVATION_LEAK = 0.98
 DEFAULT_REFRACTION_LEAK = 0.75
@@ -86,18 +88,43 @@ class NeuralNetworkState:
         return self.outputs.reshape(self.num_readouts, self.n_outputs_per_readout)
 
 
+def _build_output_mask(
+    num_neurons: int,
+    num_readouts: int,
+    n_outputs_per_readout: int,
+    num_modules: int,
+    readout_to_module: list[int],
+) -> np.ndarray:
+    """Build a binary mask (num_neurons, num_outputs) enforcing readout-module mapping.
+
+    For readout k mapped to module m, only neurons in module m's range
+    can have non-zero output weights for that readout's columns.
+    """
+    num_outputs = num_readouts * n_outputs_per_readout
+    module_size = num_neurons // num_modules
+    mask = np.zeros((num_neurons, num_outputs))
+    for k in range(num_readouts):
+        m = readout_to_module[k]
+        row_start = m * module_size
+        row_end = (m + 1) * module_size if m < num_modules - 1 else num_neurons
+        col_start = k * n_outputs_per_readout
+        col_end = (k + 1) * n_outputs_per_readout
+        mask[row_start:row_end, col_start:col_end] = 1.0
+    return mask
+
+
 @dataclass
 class NetworkGenotype:
-    """Simple direct encoding genotype for the spiking neural network.
+    """Direct encoding genotype for the modular spiking neural network.
 
-    Contains only the evolvable parameters:
-    - network_weights: neuron-to-neuron connection weights
-    - output_weights: neuron-to-output connection weights
+    Contains the evolvable parameters:
+    - network_weights: neuron-to-neuron connection weights (intra + inter module)
+    - output_weights: neuron-to-output connection weights (readout-module constrained)
     - thresholds: firing threshold per neuron
     - refraction_period: refractory period per neuron
 
-    Hyperparameters like activation_leak, refraction_leak are NOT part of the
-    genotype - they define the simulation physics, not the individual.
+    Module structure is defined by num_modules and readout_to_module mapping.
+    Output weights are masked so each readout only reads from its assigned module.
     """
 
     num_neurons: int
@@ -107,10 +134,25 @@ class NetworkGenotype:
     output_weights: np.ndarray  # (num_neurons, num_outputs)
     thresholds: np.ndarray  # (num_neurons,)
     refraction_period: np.ndarray  # (num_neurons,) integers
+    num_modules: int = DEFAULT_NUM_MODULES
+    inter_module_factor: float = DEFAULT_INTER_MODULE_FACTOR
+    readout_to_module: list = field(default_factory=lambda: list(range(DEFAULT_NUM_MODULES)))
 
     @property
     def num_outputs(self) -> int:
         return self.num_readouts * self.n_outputs_per_readout
+
+    @property
+    def output_mask(self) -> np.ndarray:
+        """Binary mask enforcing readout-module mapping on output weights."""
+        return _build_output_mask(
+            self.num_neurons, self.num_readouts, self.n_outputs_per_readout,
+            self.num_modules, self.readout_to_module,
+        )
+
+    def _apply_output_mask(self, output_weights: np.ndarray) -> np.ndarray:
+        """Zero out output weights that violate the readout-module mapping."""
+        return output_weights * self.output_mask
 
     @classmethod
     def random(
@@ -118,18 +160,30 @@ class NetworkGenotype:
         num_neurons: int = DEFAULT_NUM_NEURONS,
         num_readouts: int = DEFAULT_NUM_READOUTS,
         n_outputs_per_readout: int = DEFAULT_N_OUTPUTS_PER_READOUT,
+        num_modules: int = DEFAULT_NUM_MODULES,
+        inter_module_factor: float = DEFAULT_INTER_MODULE_FACTOR,
+        readout_to_module: Optional[list] = None,
     ) -> "NetworkGenotype":
-        """Create a random genotype."""
+        """Create a random genotype with modular connectivity."""
+        if readout_to_module is None:
+            readout_to_module = list(range(num_modules))
+
         net = NeuralNetwork(
             num_neurons=num_neurons,
             num_readouts=num_readouts,
             n_outputs_per_readout=n_outputs_per_readout,
         )
         net.randomize_weights(
-            sparsity=DEFAULT_NETWORK_SPARSITY, scale=DEFAULT_NETWORK_WEIGHT_SCALE
+            sparsity=DEFAULT_NETWORK_SPARSITY,
+            scale=DEFAULT_NETWORK_WEIGHT_SCALE,
+            num_modules=num_modules,
+            inter_module_factor=inter_module_factor,
         )
         net.randomize_output_weights(
-            sparsity=DEFAULT_OUTPUT_SPARSITY, scale=DEFAULT_OUTPUT_WEIGHT_SCALE
+            sparsity=DEFAULT_OUTPUT_SPARSITY,
+            scale=DEFAULT_OUTPUT_WEIGHT_SCALE,
+            num_modules=num_modules,
+            readout_to_module=readout_to_module,
         )
         net.randomize_thresholds()
         net.set_diagonal_weights(0)
@@ -139,7 +193,11 @@ class NetworkGenotype:
             DEFAULT_REFRACTION_VARIATION,
         )
 
-        return cls.from_network(net)
+        geno = cls.from_network(net)
+        geno.num_modules = num_modules
+        geno.inter_module_factor = inter_module_factor
+        geno.readout_to_module = readout_to_module
+        return geno
 
     @classmethod
     def from_network(cls, net: "NeuralNetwork") -> "NetworkGenotype":
@@ -161,7 +219,6 @@ class NetworkGenotype:
             num_readouts=self.num_readouts,
             n_outputs_per_readout=self.n_outputs_per_readout,
         )
-        # Set genotype parameters
         net.state.network_weights = self.network_weights.copy()
         net.state.output_weights = self.output_weights.copy()
         net.state.thresholds = self.thresholds.copy()
@@ -175,7 +232,33 @@ class NetworkGenotype:
         net.state.refraction_leak = DEFAULT_REFRACTION_LEAK
         net.state.weight_threshold = DEFAULT_WEIGHT_THRESHOLD
 
+        # Store module metadata for independence metrics
+        net.num_modules = self.num_modules
+        net.readout_to_module = self.readout_to_module
+        module_size = self.num_neurons // self.num_modules
+        assignments = np.zeros(self.num_neurons, dtype=int)
+        for m in range(self.num_modules):
+            start = m * module_size
+            end = (m + 1) * module_size if m < self.num_modules - 1 else self.num_neurons
+            assignments[start:end] = m
+        net.module_assignments = assignments
+
         return net
+
+    def _make_child(self, network_weights, output_weights, thresholds, refraction_period):
+        """Create a child genotype, applying the output mask."""
+        return NetworkGenotype(
+            num_neurons=self.num_neurons,
+            num_readouts=self.num_readouts,
+            n_outputs_per_readout=self.n_outputs_per_readout,
+            network_weights=network_weights,
+            output_weights=self._apply_output_mask(output_weights),
+            thresholds=thresholds,
+            refraction_period=refraction_period,
+            num_modules=self.num_modules,
+            inter_module_factor=self.inter_module_factor,
+            readout_to_module=self.readout_to_module,
+        )
 
     def mutate(
         self,
@@ -185,60 +268,39 @@ class NetworkGenotype:
         threshold_mutation_scale: float = 0.1,
         refraction_mutation_rate: float = 0.05,
     ) -> "NetworkGenotype":
-        """Return a mutated copy of this genotype.
-
-        Args:
-            weight_mutation_rate: Probability of mutating each weight
-            weight_mutation_scale: Std dev of gaussian noise added to weights
-            threshold_mutation_rate: Probability of mutating each threshold
-            threshold_mutation_scale: Std dev of gaussian noise added to thresholds
-            refraction_mutation_rate: Probability of mutating each refraction period
-        """
-        # Copy arrays
+        """Return a mutated copy of this genotype."""
         new_network_weights = self.network_weights.copy()
         new_output_weights = self.output_weights.copy()
         new_thresholds = self.thresholds.copy()
         new_refraction = self.refraction_period.copy()
 
-        # Mutate network weights (all weights, including zeros - topology can evolve)
         mask = np.random.random(new_network_weights.shape) < weight_mutation_rate
         new_network_weights += (
             mask * np.random.randn(*new_network_weights.shape) * weight_mutation_scale
         )
         new_network_weights = np.clip(new_network_weights, -1, 1)
-        np.fill_diagonal(new_network_weights, 0)  # Preserve no self-connections
+        np.fill_diagonal(new_network_weights, 0)
 
-        # Mutate output weights (all weights, including zeros)
         mask = np.random.random(new_output_weights.shape) < weight_mutation_rate
         new_output_weights += (
             mask * np.random.randn(*new_output_weights.shape) * weight_mutation_scale
         )
         new_output_weights = np.clip(new_output_weights, -1, 1)
 
-        # Mutate thresholds
         mask = np.random.random(new_thresholds.shape) < threshold_mutation_rate
         new_thresholds += (
             mask * np.random.randn(*new_thresholds.shape) * threshold_mutation_scale
         )
         new_thresholds = np.clip(new_thresholds, 0, 1)
 
-        # Mutate refraction periods (add/subtract 1)
         mask = np.random.random(new_refraction.shape) < refraction_mutation_rate
         new_refraction = new_refraction + mask * np.random.choice(
             [-1, 1], size=new_refraction.shape
         )
-        new_refraction = np.clip(new_refraction, 4, 33).astype(
-            int
-        )  # Match random() range
+        new_refraction = np.clip(new_refraction, 4, 33).astype(int)
 
-        return NetworkGenotype(
-            num_neurons=self.num_neurons,
-            num_readouts=self.num_readouts,
-            n_outputs_per_readout=self.n_outputs_per_readout,
-            network_weights=new_network_weights,
-            output_weights=new_output_weights,
-            thresholds=new_thresholds,
-            refraction_period=new_refraction,
+        return self._make_child(
+            new_network_weights, new_output_weights, new_thresholds, new_refraction,
         )
 
     def differential(
@@ -247,11 +309,7 @@ class NetworkGenotype:
         worse: "NetworkGenotype",
         F: float = 0.5,
     ) -> "NetworkGenotype":
-        """Differential mutation: self + F * (better - worse).
-
-        Moves this genotype in the direction from worse toward better.
-        F controls step size (0.5-1.0 typical).
-        """
+        """Differential mutation: self + F * (better - worse)."""
         new_network_weights = np.clip(
             self.network_weights + F * (better.network_weights - worse.network_weights),
             -1, 1,
@@ -268,18 +326,11 @@ class NetworkGenotype:
             0, 1,
         )
 
-        # Refraction: round the delta, keep in valid range
         refrac_delta = np.round(F * (better.refraction_period - worse.refraction_period)).astype(int)
         new_refraction = np.clip(self.refraction_period + refrac_delta, 4, 33).astype(int)
 
-        return NetworkGenotype(
-            num_neurons=self.num_neurons,
-            num_readouts=self.num_readouts,
-            n_outputs_per_readout=self.n_outputs_per_readout,
-            network_weights=new_network_weights,
-            output_weights=new_output_weights,
-            thresholds=new_thresholds,
-            refraction_period=new_refraction,
+        return self._make_child(
+            new_network_weights, new_output_weights, new_thresholds, new_refraction,
         )
 
     def crossover(self, other: "NetworkGenotype") -> "NetworkGenotype":
@@ -287,7 +338,6 @@ class NetworkGenotype:
         assert self.num_neurons == other.num_neurons
         assert self.num_outputs == other.num_outputs
 
-        # For weights: element-wise random choice
         mask_net = np.random.random(self.network_weights.shape) < 0.5
         new_network_weights = np.where(
             mask_net, self.network_weights, other.network_weights
@@ -298,7 +348,6 @@ class NetworkGenotype:
             mask_out, self.output_weights, other.output_weights
         )
 
-        # For per-neuron params: element-wise random choice
         mask_thresh = np.random.random(self.thresholds.shape) < 0.5
         new_thresholds = np.where(mask_thresh, self.thresholds, other.thresholds)
 
@@ -307,14 +356,8 @@ class NetworkGenotype:
             mask_refrac, self.refraction_period, other.refraction_period
         )
 
-        return NetworkGenotype(
-            num_neurons=self.num_neurons,
-            num_readouts=self.num_readouts,
-            n_outputs_per_readout=self.n_outputs_per_readout,
-            network_weights=new_network_weights,
-            output_weights=new_output_weights,
-            thresholds=new_thresholds,
-            refraction_period=new_refraction,
+        return self._make_child(
+            new_network_weights, new_output_weights, new_thresholds, new_refraction,
         )
 
 
@@ -476,11 +519,11 @@ class NeuralNetwork:
     def manual_activate_most_weighted_per_module(self, value: float):
         """Activate the most connected neuron in each module.
 
-        Requires randomize_modular_weights() to have been called first.
+        Requires module_assignments to be set (via to_network() or randomize_modular_weights()).
         """
         if not hasattr(self, "module_assignments"):
             raise ValueError(
-                "No module assignments found. Call randomize_modular_weights() first."
+                "No module assignments found. Set up modules first."
             )
 
         total_network_weights = np.sum(self.state.network_weights, axis=1)
@@ -540,25 +583,49 @@ class NeuralNetwork:
     def disable_refraction_decay(self):
         self.state.use_refraction_decay = False
 
-    def randomize_weights(self, sparsity=0.25, scale=0.4):
-        """Randomize weights with gaussian distribution centered at 0, clipped to [-1, 1].
+    def randomize_weights(
+        self,
+        sparsity=0.25,
+        scale=0.4,
+        num_modules: int = 1,
+        inter_module_factor: float = 1.0,
+    ):
+        """Randomize weights with optional modular block structure.
+
+        When num_modules > 1, intra-module connections use `sparsity` and
+        inter-module connections use `sparsity * inter_module_factor`.
 
         Args:
-            sparsity: Fraction of connections that exist (0-1)
+            sparsity: Fraction of intra-module connections that exist (0-1)
             scale: Standard deviation of the gaussian distribution
+            num_modules: Number of modules (1 = no modularity)
+            inter_module_factor: Multiplier on sparsity for inter-module connections
         """
-        # Gaussian distribution centered at 0, clipped to [-1, 1]
+        N = self.state.num_neurons
         self.state.network_weights = np.clip(
-            np.random.randn(self.state.num_neurons, self.state.num_neurons) * scale,
-            -1,
-            1,
+            np.random.randn(N, N) * scale, -1, 1,
         )
 
-        # Apply sparsity mask
-        mask = (
-            np.random.random((self.state.num_neurons, self.state.num_neurons))
-            < sparsity
-        )
+        if num_modules <= 1:
+            mask = np.random.random((N, N)) < sparsity
+        else:
+            module_size = N // num_modules
+            inter_sparsity = sparsity * inter_module_factor
+            mask = np.zeros((N, N))
+            for m in range(num_modules):
+                start = m * module_size
+                end = (m + 1) * module_size if m < num_modules - 1 else N
+                mask[start:end, start:end] = (
+                    np.random.random((end - start, end - start)) < sparsity
+                )
+                for m2 in range(num_modules):
+                    if m2 != m:
+                        s2 = m2 * module_size
+                        e2 = (m2 + 1) * module_size if m2 < num_modules - 1 else N
+                        mask[start:end, s2:e2] = (
+                            np.random.random((end - start, e2 - s2)) < inter_sparsity
+                        )
+
         self.state.network_weights *= mask
 
     def randomize_modular_weights(
@@ -626,15 +693,30 @@ class NeuralNetwork:
         eigenvalues = np.linalg.eigvals(self.state.network_weights)
         return np.max(np.abs(eigenvalues))
 
-    def randomize_output_weights(self, sparsity=0.1, scale=0.3):
-        self.state.output_weights = (
-            np.random.random((self.state.num_neurons, self.state.num_outputs)) * scale
-        )
-        mask = (
-            np.random.random((self.state.num_neurons, self.state.num_outputs))
-            < sparsity
-        )
-        self.state.output_weights *= mask
+    def randomize_output_weights(
+        self,
+        sparsity=0.1,
+        scale=0.3,
+        num_modules: int = 1,
+        readout_to_module: Optional[list] = None,
+    ):
+        """Randomize output weights, optionally constraining readouts to modules.
+
+        When readout_to_module is provided, readout k can only read from
+        the neurons in module readout_to_module[k].
+        """
+        N = self.state.num_neurons
+        num_out = self.state.num_outputs
+        self.state.output_weights = np.random.random((N, num_out)) * scale
+        sparsity_mask = np.random.random((N, num_out)) < sparsity
+        self.state.output_weights *= sparsity_mask
+
+        if num_modules > 1 and readout_to_module is not None:
+            module_mask = _build_output_mask(
+                N, self.state.num_readouts, self.state.n_outputs_per_readout,
+                num_modules, readout_to_module,
+            )
+            self.state.output_weights *= module_mask
 
     def randomize_thresholds(self):
         self.state.thresholds = np.random.random(self.state.num_neurons)

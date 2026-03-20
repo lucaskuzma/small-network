@@ -17,7 +17,10 @@ from typing import Optional, Union
 from tqdm import tqdm
 
 from enum import Enum
-from network import NeuralNetwork, NetworkGenotype, SCALES, DEFAULT_SCALE
+from network import (
+    NeuralNetwork, NetworkGenotype, SCALES, DEFAULT_SCALE,
+    DEFAULT_NUM_MODULES, DEFAULT_INTER_MODULE_FACTOR,
+)
 from eval_ambient import evaluate_ambient
 from eval_basic import evaluate_basic
 from utils_sonic import save_piano_roll_png
@@ -163,6 +166,50 @@ def suppress_stdout():
             yield
         finally:
             sys.stdout = old_stdout
+
+
+def _save_module_firing_plot(
+    genotype: NetworkGenotype,
+    config: "EvolutionConfig",
+    png_path: str,
+) -> None:
+    """Save diagnostic plot of per-module firing rates over time."""
+    net = genotype.to_network()
+    if not hasattr(net, "module_assignments") or net.num_modules <= 1:
+        return
+
+    firing_history = np.zeros((config.sim_steps, genotype.num_neurons), dtype=bool)
+    with suppress_stdout():
+        net.manual_activate_most_weighted(1.0)
+    for step in range(config.sim_steps):
+        net.tick(step)
+        firing_history[step] = net.state.firing
+
+    num_modules = net.num_modules
+    module_rates = np.zeros((config.sim_steps, num_modules))
+    for m in range(num_modules):
+        neurons = net.module_assignments == m
+        module_rates[:, m] = firing_history[:, neurons].mean(axis=1)
+
+    fig, ax = plt.subplots(figsize=(12, 4))
+    colors = ["#3498db", "#e74c3c", "#27ae60", "#e67e22", "#8e44ad", "#1abc9c"]
+    for m in range(num_modules):
+        ax.plot(
+            module_rates[:, m],
+            color=colors[m % len(colors)],
+            linewidth=1.2,
+            alpha=0.8,
+            label=f"Module {m}",
+        )
+    ax.set_xlabel("Step")
+    ax.set_ylabel("Firing Rate")
+    ax.set_title("Per-Module Firing Rates")
+    ax.legend(loc="upper right")
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(png_path, dpi=100)
+    plt.close(fig)
 
 
 def _save_generation_plot(
@@ -469,6 +516,8 @@ def save_params_txt(config: EvolutionConfig, output_path: str) -> None:
         DEFAULT_NUM_NEURONS,
         DEFAULT_NUM_READOUTS,
         DEFAULT_N_OUTPUTS_PER_READOUT,
+        DEFAULT_NUM_MODULES,
+        DEFAULT_INTER_MODULE_FACTOR,
         DEFAULT_ACTIVATION_LEAK,
         DEFAULT_REFRACTION_LEAK,
         DEFAULT_WEIGHT_THRESHOLD,
@@ -519,6 +568,8 @@ def save_params_txt(config: EvolutionConfig, output_path: str) -> None:
         f"num_neurons = {DEFAULT_NUM_NEURONS}",
         f"num_readouts = {DEFAULT_NUM_READOUTS}",
         f"n_outputs_per_readout = {DEFAULT_N_OUTPUTS_PER_READOUT}",
+        f"num_modules = {DEFAULT_NUM_MODULES}",
+        f"inter_module_factor = {DEFAULT_INTER_MODULE_FACTOR}",
         f"network_sparsity = {DEFAULT_NETWORK_SPARSITY}",
         f"network_weight_scale = {DEFAULT_NETWORK_WEIGHT_SCALE}",
         f"output_sparsity = {DEFAULT_OUTPUT_SPARSITY}",
@@ -786,6 +837,8 @@ class EvalResult:
     outputs_above_threshold: float = (
         0.0  # fraction of (timestep, voice) pairs above 0.3
     )
+    # Module independence: mean pairwise |correlation| of per-module firing rates
+    module_correlation: float = 0.0
 
 
 def evaluate_genotype(
@@ -821,6 +874,24 @@ def evaluate_genotype(
     total_firing_events = int(np.sum(firing_history))
     mean_activation = float(np.mean(output_history))
 
+    # Module independence: per-module firing rate correlation
+    module_correlation = 0.0
+    if hasattr(net, "module_assignments") and hasattr(net, "num_modules") and net.num_modules > 1:
+        module_rates = np.zeros((config.sim_steps, net.num_modules))
+        for m in range(net.num_modules):
+            neurons_in_module = net.module_assignments == m
+            module_rates[:, m] = firing_history[:, neurons_in_module].mean(axis=1)
+        # Pairwise |Pearson correlation|, handling constant-rate edge cases
+        pair_corrs = []
+        for i in range(net.num_modules):
+            for j in range(i + 1, net.num_modules):
+                if module_rates[:, i].std() > 0 and module_rates[:, j].std() > 0:
+                    r = np.corrcoef(module_rates[:, i], module_rates[:, j])[0, 1]
+                    pair_corrs.append(abs(r))
+                else:
+                    pair_corrs.append(0.0)
+        module_correlation = float(np.mean(pair_corrs)) if pair_corrs else 0.0
+
     # Output statistics for debugging activity ceiling
     output_max = float(np.max(output_history))
     output_min = float(np.min(output_history))
@@ -854,6 +925,7 @@ def evaluate_genotype(
             output_max=output_max,
             output_min=output_min,
             outputs_above_threshold=outputs_above_threshold,
+            module_correlation=module_correlation,
         )
 
     # Convert outputs to MIDI using mapper (auto-created from config.encoding)
@@ -921,6 +993,7 @@ def evaluate_genotype(
         output_max=output_max,
         output_min=output_min,
         outputs_above_threshold=outputs_above_threshold,
+        module_correlation=module_correlation,
     )
 
 
@@ -967,6 +1040,8 @@ class GenerationStats:
     gen_wins_mutation: int = 0
     gen_wins_random: int = 0
     gen_wins_differential: int = 0
+    # Module independence (mean pairwise |correlation| of per-module firing rates)
+    best_module_correlation: float = 0.0
 
 
 @dataclass
@@ -1567,6 +1642,7 @@ def run_evolution(
             gen_wins_mutation=gen_wins_mut,
             gen_wins_random=gen_wins_rnd,
             gen_wins_differential=gen_wins_diff,
+            best_module_correlation=best_result.module_correlation,
         )
         history.append(stats)
 
@@ -1619,7 +1695,7 @@ def run_evolution(
         tqdm.write(
             f"Gen {current_gen:3d} | "
             f"Best: {stats.best_fitness:.4f} | "
-            f"act:{best_result.activity:.2f} grav:{best_result.tonal_gravity:.2f} rep:{best_result.repetition_score:.2f} | "
+            f"act:{best_result.activity:.2f} grav:{best_result.tonal_gravity:.2f} rep:{best_result.repetition_score:.2f} mcor:{best_result.module_correlation:.2f} | "
             f"notes:{best_result.note_count:3d} | "
             f"[{survival_str}] | "
             f"age:{stats.best_age:2d}{species_str} | "
@@ -1671,6 +1747,15 @@ def run_evolution(
             )
             if os.path.exists(temp_midi):
                 os.remove(temp_midi)
+
+            # Save per-module firing rate diagnostic
+            module_graph_dir = os.path.join(config.output_dir, "module_graphs")
+            os.makedirs(module_graph_dir, exist_ok=True)
+            _save_module_firing_plot(
+                best_ever_individual.genotype,
+                config,
+                os.path.join(module_graph_dir, f"{filename}_modules.png"),
+            )
             last_saved_fitness = current_best_fitness
 
         # # Save checkpoint periodically
@@ -1719,6 +1804,14 @@ def run_evolution(
         duration_beats=config.sim_steps / 4,  # 16th notes to beats
         tempo=config.tempo,
     )
+    # Save final module firing rate diagnostic
+    module_graph_dir = os.path.join(config.output_dir, "module_graphs")
+    os.makedirs(module_graph_dir, exist_ok=True)
+    _save_module_firing_plot(
+        best_ever_individual.genotype,
+        config,
+        os.path.join(module_graph_dir, f"{filename}_modules.png"),
+    )
     print(f"Final best saved to: {final_midi_path}")
 
     return best_ever_individual.genotype, history
@@ -1741,6 +1834,7 @@ def plot_evolution_history(
     activity = [s.best_activity for s in history]
     tonal_gravity = [getattr(s, "best_tonal_gravity", 0.0) for s in history]
     repetition = [getattr(s, "best_repetition_score", 0.0) for s in history]
+    module_corr = [getattr(s, "best_module_correlation", 0.0) for s in history]
     wins_mut = [s.gen_wins_mutation for s in history]
     wins_diff = [getattr(s, "gen_wins_differential", 0) for s in history]
     wins_rnd = [s.gen_wins_random for s in history]
@@ -1795,6 +1889,15 @@ def plot_evolution_history(
         color="#e67e22",
         linewidth=2,
         label="Repetition",
+        alpha=0.8,
+    )
+    ax.plot(
+        generations,
+        module_corr,
+        "-",
+        color="#e74c3c",
+        linewidth=2,
+        label="Module Corr",
         alpha=0.8,
     )
     ax.set_xlabel("Generation")
