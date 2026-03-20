@@ -4,7 +4,6 @@
 import numpy as np
 import time
 
-
 # =======================================================================
 # Threshold helpers
 # =======================================================================
@@ -250,7 +249,7 @@ def save_readout_outputs_as_midi(
     """
     Save neural network readout outputs as MIDI file.
     Each readout (voice) on a separate track, chromatic pitch classes (0-11).
-    
+
     Args:
         output_history: numpy array of shape (T, num_readouts, 12) or (T, num_readouts, n_pitches)
         filename: output MIDI filename
@@ -271,7 +270,7 @@ def save_readout_outputs_as_midi(
     # Default base notes - each voice gets its own octave
     if base_notes is None:
         base_notes = [48, 60, 72, 84]  # C3, C4, C5, C6
-    
+
     # Ensure we have enough base notes
     while len(base_notes) < num_readouts:
         base_notes.append(base_notes[-1] + 12)
@@ -293,9 +292,7 @@ def save_readout_outputs_as_midi(
         mid.tracks.append(track)
 
         # Add metadata
-        track.append(
-            MetaMessage("track_name", name=f"Voice {readout_idx + 1}", time=0)
-        )
+        track.append(MetaMessage("track_name", name=f"Voice {readout_idx + 1}", time=0))
         if readout_idx == 0:
             # Only first track gets tempo
             microseconds_per_beat = int(60_000_000 / tempo)
@@ -403,10 +400,10 @@ def save_argmax_outputs_as_midi(
 ):
     """
     Save network outputs as MIDI using argmax selection per voice.
-    
+
     Only one pitch per voice per timestep: the one with highest output value.
     Note only triggers if that highest value exceeds min_threshold.
-    
+
     Args:
         output_history: numpy array of shape (T, num_voices, n_pitches)
         filename: output MIDI filename
@@ -653,7 +650,9 @@ def save_motion_outputs_as_midi(
             vel_min, vel_max = velocity_range
             if vel_active:
                 # Map (threshold, 1.0) -> (vel_min, vel_max)
-                vel_normalized = (vel_raw - voice_threshold) / (1 - voice_threshold + 1e-6)
+                vel_normalized = (vel_raw - voice_threshold) / (
+                    1 - voice_threshold + 1e-6
+                )
                 midi_velocity = int(vel_min + vel_normalized * (vel_max - vel_min))
                 midi_velocity = np.clip(midi_velocity, vel_min, vel_max)
             else:
@@ -665,8 +664,13 @@ def save_motion_outputs_as_midi(
                     # Start new note
                     delta = step_time - current_absolute_time
                     track.append(
-                        Message("note_on", note=target_note, velocity=midi_velocity,
-                                time=delta, channel=voice_idx)
+                        Message(
+                            "note_on",
+                            note=target_note,
+                            velocity=midi_velocity,
+                            time=delta,
+                            channel=voice_idx,
+                        )
                     )
                     current_absolute_time = step_time
                     current_note = target_note
@@ -675,12 +679,22 @@ def save_motion_outputs_as_midi(
                     # Pitch changed - end old note, start new
                     delta = step_time - current_absolute_time
                     track.append(
-                        Message("note_off", note=current_note, velocity=0,
-                                time=delta, channel=voice_idx)
+                        Message(
+                            "note_off",
+                            note=current_note,
+                            velocity=0,
+                            time=delta,
+                            channel=voice_idx,
+                        )
                     )
                     track.append(
-                        Message("note_on", note=target_note, velocity=midi_velocity,
-                                time=0, channel=voice_idx)
+                        Message(
+                            "note_on",
+                            note=target_note,
+                            velocity=midi_velocity,
+                            time=0,
+                            channel=voice_idx,
+                        )
                     )
                     current_absolute_time = step_time
                     current_note = target_note
@@ -690,8 +704,13 @@ def save_motion_outputs_as_midi(
                 # Velocity dropped below threshold - end note
                 delta = step_time - current_absolute_time
                 track.append(
-                    Message("note_off", note=current_note, velocity=0,
-                            time=delta, channel=voice_idx)
+                    Message(
+                        "note_off",
+                        note=current_note,
+                        velocity=0,
+                        time=delta,
+                        channel=voice_idx,
+                    )
                 )
                 current_absolute_time = step_time
                 current_note = None
@@ -701,8 +720,13 @@ def save_motion_outputs_as_midi(
             final_time = num_steps * ticks_per_16th
             delta = final_time - current_absolute_time
             track.append(
-                Message("note_off", note=current_note, velocity=0,
-                        time=delta, channel=voice_idx)
+                Message(
+                    "note_off",
+                    note=current_note,
+                    velocity=0,
+                    time=delta,
+                    channel=voice_idx,
+                )
             )
             current_absolute_time = final_time
 
@@ -763,11 +787,11 @@ def save_piano_roll_png(
 ):
     """
     Save a piano roll visualization of a MIDI file.
-    
+
     Fixed extents for animation compatibility:
     - X-axis: 0 to duration_beats (in beats)
     - Y-axis: pitch_range[0] to pitch_range[1] (MIDI note numbers)
-    
+
     Args:
         midi_path: Path to input MIDI file
         png_path: Path for output PNG (default: same as midi_path with .png extension)
@@ -779,51 +803,55 @@ def save_piano_roll_png(
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
     from mido import MidiFile
-    
+
     if png_path is None:
         png_path = midi_path.rsplit(".", 1)[0] + ".png"
-    
+
     # Load MIDI and extract notes
     mid = MidiFile(midi_path)
     ticks_per_beat = mid.ticks_per_beat
-    
+
     notes = []
     for track_idx, track in enumerate(mid.tracks):
         current_tick = 0
         active_notes = {}  # (pitch, channel) -> start_tick
-        
+
         for msg in track:
             current_tick += msg.time
-            
+
             if msg.type == "note_on" and msg.velocity > 0:
                 key = (msg.note, msg.channel)
                 active_notes[key] = (current_tick, msg.velocity)
-            
-            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+
+            elif msg.type == "note_off" or (
+                msg.type == "note_on" and msg.velocity == 0
+            ):
                 key = (msg.note, msg.channel)
                 if key in active_notes:
                     start_tick, velocity = active_notes[key]
-                    notes.append({
-                        "pitch": msg.note,
-                        "start_beat": start_tick / ticks_per_beat,
-                        "end_beat": current_tick / ticks_per_beat,
-                        "velocity": velocity,
-                        "track": track_idx,
-                    })
+                    notes.append(
+                        {
+                            "pitch": msg.note,
+                            "start_beat": start_tick / ticks_per_beat,
+                            "end_beat": current_tick / ticks_per_beat,
+                            "velocity": velocity,
+                            "track": track_idx,
+                        }
+                    )
                     del active_notes[key]
-    
+
     # Create figure with fixed size
     fig, ax = plt.subplots(figsize=figsize)
-    
+
     # Color by track (voice)
     track_colors = ["#3498db", "#e74c3c", "#2ecc71", "#9b59b6", "#f39c12", "#1abc9c"]
-    
+
     # Draw notes as rectangles
     for note in notes:
         color = track_colors[note["track"] % len(track_colors)]
         # Velocity -> alpha (0.4 to 1.0)
         alpha = 0.4 + 0.6 * (note["velocity"] / 127)
-        
+
         rect = patches.Rectangle(
             (note["start_beat"], note["pitch"] - 0.4),
             note["end_beat"] - note["start_beat"],
@@ -834,28 +862,28 @@ def save_piano_roll_png(
             alpha=alpha,
         )
         ax.add_patch(rect)
-    
+
     # Fixed axes for animation
     ax.set_xlim(0, duration_beats)
     ax.set_ylim(pitch_range[0], pitch_range[1])
-    
+
     # Grid lines on octaves (C notes)
     octave_notes = [n for n in range(pitch_range[0], pitch_range[1] + 1) if n % 12 == 0]
     ax.set_yticks(octave_notes)
     ax.set_yticklabels([f"C{n // 12 - 1}" for n in octave_notes])
     ax.yaxis.grid(True, alpha=0.3)
-    
+
     # Beat grid
     ax.xaxis.grid(True, alpha=0.3)
     ax.set_xticks(range(0, int(duration_beats) + 1, 4))
-    
+
     ax.set_xlabel("Beats")
     ax.set_ylabel("Pitch")
     ax.set_facecolor("#f8f9fa")
-    
+
     # Tight layout and save
     plt.tight_layout()
     plt.savefig(png_path, dpi=100, bbox_inches="tight", facecolor="white")
     plt.close(fig)
-    
+
     return png_path

@@ -8,7 +8,6 @@ from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass
 import mido
 
-
 # Scale definitions as pitch class sets (0 = C)
 SCALES = {
     "major": {0, 2, 4, 5, 7, 9, 11},
@@ -35,40 +34,46 @@ TRANSITION_TARGETS: Dict[str, Tuple[List[int], np.ndarray]] = {
     # The C<->Db half-step is the defining gesture. Db->C resolution is strongest.
     "in-sen": (
         [0, 1, 5, 7, 10],
-        np.array([
-            #    C     Db    F     G     Bb
-            [0.00, 0.40, 0.25, 0.20, 0.15],  # FROM C:  C->Db semitone tension
-            [0.45, 0.00, 0.25, 0.15, 0.15],  # FROM Db: Db->C resolution
-            [0.20, 0.15, 0.00, 0.35, 0.30],  # FROM F:  F->G stepwise, F->Bb
-            [0.20, 0.10, 0.30, 0.00, 0.40],  # FROM G:  G->Bb stepwise, G->F
-            [0.35, 0.20, 0.20, 0.25, 0.00],  # FROM Bb: Bb->C resolution
-        ]),
+        np.array(
+            [
+                #    C     Db    F     G     Bb
+                [0.00, 0.40, 0.25, 0.20, 0.15],  # FROM C:  C->Db semitone tension
+                [0.45, 0.00, 0.25, 0.15, 0.15],  # FROM Db: Db->C resolution
+                [0.20, 0.15, 0.00, 0.35, 0.30],  # FROM F:  F->G stepwise, F->Bb
+                [0.20, 0.10, 0.30, 0.00, 0.40],  # FROM G:  G->Bb stepwise, G->F
+                [0.35, 0.20, 0.20, 0.25, 0.00],  # FROM Bb: Bb->C resolution
+            ]
+        ),
     ),
     # Iwato: C, Db, F, Gb, Bb — semitones at C<->Db AND F<->Gb
     # Darkest scale: two semitone poles, tritone C-Gb.
     "iwato": (
         [0, 1, 5, 6, 10],
-        np.array([
-            #    C     Db    F     Gb    Bb
-            [0.00, 0.40, 0.20, 0.15, 0.25],  # FROM C:  C->Db semitone
-            [0.45, 0.00, 0.25, 0.10, 0.20],  # FROM Db: Db->C resolution
-            [0.15, 0.10, 0.00, 0.45, 0.30],  # FROM F:  F->Gb semitone
-            [0.15, 0.10, 0.45, 0.00, 0.30],  # FROM Gb: Gb->F resolution
-            [0.35, 0.15, 0.25, 0.25, 0.00],  # FROM Bb: Bb->C, connects both poles
-        ]),
+        np.array(
+            [
+                #    C     Db    F     Gb    Bb
+                [0.00, 0.40, 0.20, 0.15, 0.25],  # FROM C:  C->Db semitone
+                [0.45, 0.00, 0.25, 0.10, 0.20],  # FROM Db: Db->C resolution
+                [0.15, 0.10, 0.00, 0.45, 0.30],  # FROM F:  F->Gb semitone
+                [0.15, 0.10, 0.45, 0.00, 0.30],  # FROM Gb: Gb->F resolution
+                [0.35, 0.15, 0.25, 0.25, 0.00],  # FROM Bb: Bb->C, connects both poles
+            ]
+        ),
     ),
     # Kumoi: C, D, Eb, G, A — semitone at D<->Eb
     # Warmer scale. C-G fifth is structural, D<->Eb is the color.
     "kumoi": (
         [0, 2, 3, 7, 9],
-        np.array([
-            #    C     D     Eb    G     A
-            [0.00, 0.30, 0.15, 0.35, 0.20],  # FROM C:  C->G structural, C->D
-            [0.25, 0.00, 0.40, 0.20, 0.15],  # FROM D:  D->Eb semitone
-            [0.20, 0.45, 0.00, 0.20, 0.15],  # FROM Eb: Eb->D resolution
-            [0.30, 0.15, 0.10, 0.00, 0.45],  # FROM G:  G->A stepwise, G->C
-            [0.25, 0.15, 0.15, 0.45, 0.00],  # FROM A:  A->G stepwise
-        ]),
+        np.array(
+            [
+                #    C     D     Eb    G     A
+                [0.00, 0.30, 0.15, 0.35, 0.20],  # FROM C:  C->G structural, C->D
+                [0.25, 0.00, 0.40, 0.20, 0.15],  # FROM D:  D->Eb semitone
+                [0.20, 0.45, 0.00, 0.20, 0.15],  # FROM Eb: Eb->D resolution
+                [0.30, 0.15, 0.10, 0.00, 0.45],  # FROM G:  G->A stepwise, G->C
+                [0.25, 0.15, 0.15, 0.45, 0.00],  # FROM A:  A->G stepwise
+            ]
+        ),
     ),
 }
 
@@ -76,9 +81,9 @@ TRANSITION_TARGETS: Dict[str, Tuple[List[int], np.ndarray]] = {
 # Stable tones per scale (pitch classes that serve as metric anchors).
 # Root + fifth where possible; root + fourth for Iwato (no clean fifth).
 STABLE_TONES: Dict[str, set] = {
-    "in-sen": {0, 7},   # C + G (fifth)
-    "iwato":  {0, 5},   # C + F (fourth; Gb is a tritone, not stable)
-    "kumoi":  {0, 7},   # C + G (fifth)
+    "in-sen": {0, 7},  # C + G (fifth)
+    "iwato": {0, 5},  # C + F (fourth; Gb is a tritone, not stable)
+    "kumoi": {0, 7},  # C + G (fifth)
 }
 
 # Fractal metric weight pattern for one 4-beat phrase (16 16th-notes).
@@ -102,7 +107,9 @@ class BasicMetrics:
     repetition_score: float  # 0-1, penalty for repeated n-grams (1 = no repetition)
     tonal_gravity: float  # 0-1, joint transition distribution match (captures both idiom + variety)
     metric_gravity: float  # 0-1, stable tones on strong beats
-    composite_score: float  # activity * tonal_gravity * repetition_score * metric_gravity
+    composite_score: (
+        float  # activity * tonal_gravity * repetition_score * metric_gravity
+    )
 
     def __str__(self) -> str:
         return (
@@ -451,11 +458,15 @@ class BasicAnalyzer:
 
         # Laplace smoothing so no transition type has zero probability
         alpha = 1.0
-        observed_flat = (observed_counts + alpha) / (total + self._n_transition_types * alpha)
+        observed_flat = (observed_counts + alpha) / (
+            total + self._n_transition_types * alpha
+        )
 
         # KL(target || observed): heavily penalizes transitions the target
         # expects but the network never makes (the oscillator failure mode)
-        kl = float(np.sum(self._target_flat * np.log(self._target_flat / observed_flat)))
+        kl = float(
+            np.sum(self._target_flat * np.log(self._target_flat / observed_flat))
+        )
 
         return float(np.exp(-kl))
 
@@ -540,9 +551,7 @@ class BasicAnalyzer:
         else:
             return 1.0 - 0.5 * (ratio - target) / (1.0 - target)
 
-    def compute_metric_gravity(
-        self, notes: List[dict], ticks_per_beat: int
-    ) -> float:
+    def compute_metric_gravity(self, notes: List[dict], ticks_per_beat: int) -> float:
         """Compute metric gravity per voice, then aggregate (min).
 
         Returns 0-1 (1 = voices tend to play root/fifth on strong beats).

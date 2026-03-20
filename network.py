@@ -9,9 +9,9 @@ import numpy as np
 # =============================================================================
 # Japanese pentatonic scales (all 5-note)
 SCALES = {
-    "in-sen":  [0, 1, 5, 7, 10],  # C, Db, F, G, Bb
-    "iwato":   [0, 1, 5, 6, 10],  # C, Db, F, Gb, Bb
-    "kumoi":   [0, 2, 3, 7, 9],   # C, D, Eb, G, A
+    "in-sen": [0, 1, 5, 7, 10],  # C, Db, F, G, Bb
+    "iwato": [0, 1, 5, 6, 10],  # C, Db, F, Gb, Bb
+    "kumoi": [0, 2, 3, 7, 9],  # C, D, Eb, G, A
 }
 DEFAULT_SCALE = "in-sen"
 
@@ -136,7 +136,9 @@ class NetworkGenotype:
     refraction_period: np.ndarray  # (num_neurons,) integers
     num_modules: int = DEFAULT_NUM_MODULES
     inter_module_factor: float = DEFAULT_INTER_MODULE_FACTOR
-    readout_to_module: list = field(default_factory=lambda: list(range(DEFAULT_NUM_MODULES)))
+    readout_to_module: list = field(
+        default_factory=lambda: list(range(DEFAULT_NUM_MODULES))
+    )
 
     @property
     def num_outputs(self) -> int:
@@ -146,8 +148,11 @@ class NetworkGenotype:
     def output_mask(self) -> np.ndarray:
         """Binary mask enforcing readout-module mapping on output weights."""
         return _build_output_mask(
-            self.num_neurons, self.num_readouts, self.n_outputs_per_readout,
-            self.num_modules, self.readout_to_module,
+            self.num_neurons,
+            self.num_readouts,
+            self.n_outputs_per_readout,
+            self.num_modules,
+            self.readout_to_module,
         )
 
     def _apply_output_mask(self, output_weights: np.ndarray) -> np.ndarray:
@@ -239,13 +244,17 @@ class NetworkGenotype:
         assignments = np.zeros(self.num_neurons, dtype=int)
         for m in range(self.num_modules):
             start = m * module_size
-            end = (m + 1) * module_size if m < self.num_modules - 1 else self.num_neurons
+            end = (
+                (m + 1) * module_size if m < self.num_modules - 1 else self.num_neurons
+            )
             assignments[start:end] = m
         net.module_assignments = assignments
 
         return net
 
-    def _make_child(self, network_weights, output_weights, thresholds, refraction_period):
+    def _make_child(
+        self, network_weights, output_weights, thresholds, refraction_period
+    ):
         """Create a child genotype, applying the output mask."""
         return NetworkGenotype(
             num_neurons=self.num_neurons,
@@ -300,7 +309,10 @@ class NetworkGenotype:
         new_refraction = np.clip(new_refraction, 4, 33).astype(int)
 
         return self._make_child(
-            new_network_weights, new_output_weights, new_thresholds, new_refraction,
+            new_network_weights,
+            new_output_weights,
+            new_thresholds,
+            new_refraction,
         )
 
     def differential(
@@ -312,25 +324,35 @@ class NetworkGenotype:
         """Differential mutation: self + F * (better - worse)."""
         new_network_weights = np.clip(
             self.network_weights + F * (better.network_weights - worse.network_weights),
-            -1, 1,
+            -1,
+            1,
         )
         np.fill_diagonal(new_network_weights, 0)
 
         new_output_weights = np.clip(
             self.output_weights + F * (better.output_weights - worse.output_weights),
-            -1, 1,
+            -1,
+            1,
         )
 
         new_thresholds = np.clip(
             self.thresholds + F * (better.thresholds - worse.thresholds),
-            0, 1,
+            0,
+            1,
         )
 
-        refrac_delta = np.round(F * (better.refraction_period - worse.refraction_period)).astype(int)
-        new_refraction = np.clip(self.refraction_period + refrac_delta, 4, 33).astype(int)
+        refrac_delta = np.round(
+            F * (better.refraction_period - worse.refraction_period)
+        ).astype(int)
+        new_refraction = np.clip(self.refraction_period + refrac_delta, 4, 33).astype(
+            int
+        )
 
         return self._make_child(
-            new_network_weights, new_output_weights, new_thresholds, new_refraction,
+            new_network_weights,
+            new_output_weights,
+            new_thresholds,
+            new_refraction,
         )
 
     def crossover(self, other: "NetworkGenotype") -> "NetworkGenotype":
@@ -357,7 +379,10 @@ class NetworkGenotype:
         )
 
         return self._make_child(
-            new_network_weights, new_output_weights, new_thresholds, new_refraction,
+            new_network_weights,
+            new_output_weights,
+            new_thresholds,
+            new_refraction,
         )
 
 
@@ -522,9 +547,7 @@ class NeuralNetwork:
         Requires module_assignments to be set (via to_network() or randomize_modular_weights()).
         """
         if not hasattr(self, "module_assignments"):
-            raise ValueError(
-                "No module assignments found. Set up modules first."
-            )
+            raise ValueError("No module assignments found. Set up modules first.")
 
         total_network_weights = np.sum(self.state.network_weights, axis=1)
         activated = []
@@ -597,7 +620,9 @@ class NeuralNetwork:
         """
         N = self.state.num_neurons
         self.state.network_weights = np.clip(
-            np.random.randn(N, N) * scale, -1, 1,
+            np.random.randn(N, N) * scale,
+            -1,
+            1,
         )
 
         if num_modules <= 1:
@@ -711,8 +736,11 @@ class NeuralNetwork:
             raise ValueError("readout_to_module is required when num_modules > 1")
         if num_modules > 1 and readout_to_module is not None:
             module_mask = _build_output_mask(
-                N, self.state.num_readouts, self.state.n_outputs_per_readout,
-                num_modules, readout_to_module,
+                N,
+                self.state.num_readouts,
+                self.state.n_outputs_per_readout,
+                num_modules,
+                readout_to_module,
             )
             self.state.output_weights *= module_mask
 

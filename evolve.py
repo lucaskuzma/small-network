@@ -18,8 +18,12 @@ from tqdm import tqdm
 
 from enum import Enum
 from network import (
-    NeuralNetwork, NetworkGenotype, SCALES, DEFAULT_SCALE,
-    DEFAULT_NUM_MODULES, DEFAULT_INTER_MODULE_FACTOR,
+    NeuralNetwork,
+    NetworkGenotype,
+    SCALES,
+    DEFAULT_SCALE,
+    DEFAULT_NUM_MODULES,
+    DEFAULT_INTER_MODULE_FACTOR,
 )
 from eval_ambient import evaluate_ambient
 from eval_basic import evaluate_basic
@@ -877,7 +881,11 @@ def evaluate_genotype(
 
     # Module independence: per-module firing rate correlation
     module_correlation = 0.0
-    if hasattr(net, "module_assignments") and hasattr(net, "num_modules") and net.num_modules > 1:
+    if (
+        hasattr(net, "module_assignments")
+        and hasattr(net, "num_modules")
+        and net.num_modules > 1
+    ):
         module_rates = np.zeros((config.sim_steps, net.num_modules))
         for m in range(net.num_modules):
             neurons_in_module = net.module_assignments == m
@@ -1864,6 +1872,7 @@ def _plot_pitch_histogram(
             config.midi_mapper(output_history, temp_midi, config.tempo)
 
         from eval_basic import BasicAnalyzer
+
         analyzer = BasicAnalyzer(target_notes=config.sim_steps, scale=config.scale)
         notes, _, _ = analyzer.load_midi(temp_midi)
     finally:
@@ -1876,6 +1885,7 @@ def _plot_pitch_histogram(
         return
 
     from collections import defaultdict
+
     notes_by_track = defaultdict(list)
     for n in notes:
         notes_by_track[n["track"]].append(n["pitch"] % 12)
@@ -1884,7 +1894,9 @@ def _plot_pitch_histogram(
     tracks = sorted(notes_by_track.keys())
 
     stable = STABLE_TONES.get(config.scale, set()) if config.scale else set()
-    scale_pcs = sorted(set(pc for track_pcs in notes_by_track.values() for pc in track_pcs))
+    scale_pcs = sorted(
+        set(pc for track_pcs in notes_by_track.values() for pc in track_pcs)
+    )
     if not scale_pcs:
         scale_pcs = list(range(12))
 
@@ -1911,7 +1923,9 @@ def _plot_pitch_histogram(
                 bar_obj.set_edgecolor("black")
                 bar_obj.set_linewidth(1.5)
 
-    tick_positions = [i + bar_width * (num_voices - 1) / 2 for i in range(len(scale_pcs))]
+    tick_positions = [
+        i + bar_width * (num_voices - 1) / 2 for i in range(len(scale_pcs))
+    ]
     tick_labels = [NOTE_NAMES[pc] for pc in scale_pcs]
     ax.set_xticks(tick_positions)
     ax.set_xticklabels(tick_labels)
@@ -2305,7 +2319,9 @@ if __name__ == "__main__":
 
     # Plot results
     plot_path = os.path.join(config.output_dir, "evolution_history.png")
-    plot_evolution_history(history, save_path=plot_path, best_genotype=best_genotype, config=config)
+    plot_evolution_history(
+        history, save_path=plot_path, best_genotype=best_genotype, config=config
+    )
 
     # Save best genotype
     genotype_path = os.path.join(config.output_dir, "best_genotype.pkl")

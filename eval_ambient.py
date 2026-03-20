@@ -9,7 +9,6 @@ from typing import List, Set, Tuple, Optional
 from dataclasses import dataclass
 import mido
 
-
 # Scale definitions as pitch class sets (0 = C)
 SCALES = {
     "major": {0, 2, 4, 5, 7, 9, 11},

@@ -5,7 +5,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-
 # =======================================================================
 # Plotting helpers
 # =======================================================================
@@ -938,4 +937,3 @@ def plot_cluster_metrics_overlaid(
     )
     plt.tight_layout()
     plt.show()
-

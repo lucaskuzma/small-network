@@ -30,7 +30,9 @@ net = NeuralNetwork(
     n_outputs_per_readout=N_OUTPUTS_PER_VOICE,
 )
 
-print(f"Network: {NUM_NEURONS} neurons, {NUM_VOICES} voices × {N_OUTPUTS_PER_VOICE} outputs")
+print(
+    f"Network: {NUM_NEURONS} neurons, {NUM_VOICES} voices × {N_OUTPUTS_PER_VOICE} outputs"
+)
 print(f"Total outputs: {net.state.num_outputs}")
 
 # %%
@@ -72,14 +74,14 @@ velocity_history = np.zeros((SIM_STEPS, NUM_VOICES))
 for step in range(SIM_STEPS):
     for voice in range(NUM_VOICES):
         outputs = output_history[step, voice, :]
-        
+
         # Motion from bits 0-5
         up_bits = (outputs[0:3] > 0.5).astype(int)
         down_bits = (outputs[3:6] > 0.5).astype(int)
         up_sum = np.dot(up_bits, up_weights)
         down_sum = np.dot(down_bits, down_weights)
         motion_history[step, voice] = up_sum - down_sum
-        
+
         # Velocity from bits 6-7
         velocity_history[step, voice] = outputs[6] * outputs[7]
 
@@ -89,7 +91,7 @@ fig, axes = plt.subplots(NUM_VOICES, 1, figsize=(14, 3 * NUM_VOICES), sharex=Tru
 
 for v in range(NUM_VOICES):
     ax = axes[v] if NUM_VOICES > 1 else axes
-    
+
     im = ax.imshow(
         output_history[:, v, :].T,
         aspect="auto",
@@ -99,7 +101,7 @@ for v in range(NUM_VOICES):
         vmax=1,
         extent=[0, SIM_STEPS, -0.5, N_OUTPUTS_PER_VOICE - 0.5],
     )
-    
+
     ax.set_ylabel(f"Voice {v + 1}")
     ax.set_yticks(range(N_OUTPUTS_PER_VOICE))
     ax.set_yticklabels(OUTPUT_NAMES)
@@ -186,13 +188,19 @@ for v in range(NUM_VOICES):
     voice_velocity = velocity_history[:, v]
     active_steps = np.sum(voice_velocity > 0.3)
     motion_events = np.sum(voice_motion != 0)
-    mean_motion = np.mean(np.abs(voice_motion[voice_motion != 0])) if motion_events > 0 else 0
-    
+    mean_motion = (
+        np.mean(np.abs(voice_motion[voice_motion != 0])) if motion_events > 0 else 0
+    )
+
     print(f"Voice {v + 1}:")
-    print(f"  Active steps (vel > 0.3): {active_steps} ({active_steps/SIM_STEPS*100:.1f}%)")
+    print(
+        f"  Active steps (vel > 0.3): {active_steps} ({active_steps/SIM_STEPS*100:.1f}%)"
+    )
     print(f"  Motion events (≠0): {motion_events} ({motion_events/SIM_STEPS*100:.1f}%)")
     print(f"  Mean |motion| when moving: {mean_motion:.2f} semitones")
-    print(f"  Pitch range: {cumulative_pitch[:, v].min():.0f} to {cumulative_pitch[:, v].max():.0f}")
+    print(
+        f"  Pitch range: {cumulative_pitch[:, v].min():.0f} to {cumulative_pitch[:, v].max():.0f}"
+    )
 
 # %%
 # Export to MIDI using motion encoding
@@ -243,4 +251,3 @@ axes[1].grid(True, alpha=0.3, axis="y")
 
 plt.tight_layout()
 plt.show()
-
