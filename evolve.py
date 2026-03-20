@@ -1827,11 +1827,108 @@ def run_evolution(
 # Visualization
 # =============================================================================
 
+NOTE_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+
+
+def _plot_pitch_histogram(
+    ax,
+    genotype: Optional[NetworkGenotype],
+    config: Optional["EvolutionConfig"],
+) -> None:
+    """Plot per-voice pitch class histogram on the given axes.
+
+    Simulates the best genotype, writes a temp MIDI, loads it back, and draws
+    grouped bars showing how often each pitch class is played per voice.
+    Stable tones are highlighted with darker outlines.
+    """
+    from eval_basic import STABLE_TONES
+
+    if genotype is None or config is None:
+        ax.text(0.5, 0.5, "No genotype data", ha="center", va="center")
+        ax.set_title("Pitch Distribution")
+        return
+
+    net = genotype.to_network()
+    output_history = np.zeros(
+        (config.sim_steps, net.state.num_readouts, net.state.n_outputs_per_readout)
+    )
+    with suppress_stdout():
+        net.manual_activate_most_weighted(1.0)
+    for step in range(config.sim_steps):
+        net.tick(step)
+        output_history[step] = net.get_readout_outputs()
+
+    temp_midi = f"/tmp/_pitch_hist_{os.getpid()}.mid"
+    try:
+        with suppress_stdout():
+            config.midi_mapper(output_history, temp_midi, config.tempo)
+
+        from eval_basic import BasicAnalyzer
+        analyzer = BasicAnalyzer(target_notes=config.sim_steps, scale=config.scale)
+        notes, _, _ = analyzer.load_midi(temp_midi)
+    finally:
+        if os.path.exists(temp_midi):
+            os.remove(temp_midi)
+
+    if not notes:
+        ax.text(0.5, 0.5, "No notes produced", ha="center", va="center")
+        ax.set_title("Pitch Distribution")
+        return
+
+    from collections import defaultdict
+    notes_by_track = defaultdict(list)
+    for n in notes:
+        notes_by_track[n["track"]].append(n["pitch"] % 12)
+
+    num_voices = len(notes_by_track)
+    tracks = sorted(notes_by_track.keys())
+
+    stable = STABLE_TONES.get(config.scale, set()) if config.scale else set()
+    scale_pcs = sorted(set(pc for track_pcs in notes_by_track.values() for pc in track_pcs))
+    if not scale_pcs:
+        scale_pcs = list(range(12))
+
+    bar_width = 0.8 / max(num_voices, 1)
+    voice_colors = ["#3498db", "#e74c3c", "#27ae60", "#e67e22", "#8e44ad", "#1abc9c"]
+
+    for vi, track in enumerate(tracks):
+        pcs = notes_by_track[track]
+        counts = np.bincount(pcs, minlength=12)
+        x_positions = [scale_pcs.index(pc) + vi * bar_width for pc in scale_pcs]
+        heights = [counts[pc] for pc in scale_pcs]
+
+        bars = ax.bar(
+            x_positions,
+            heights,
+            width=bar_width,
+            color=voice_colors[vi % len(voice_colors)],
+            alpha=0.75,
+            label=f"Voice {vi}",
+        )
+
+        for bar_obj, pc in zip(bars, scale_pcs):
+            if pc in stable:
+                bar_obj.set_edgecolor("black")
+                bar_obj.set_linewidth(1.5)
+
+    tick_positions = [i + bar_width * (num_voices - 1) / 2 for i in range(len(scale_pcs))]
+    tick_labels = [NOTE_NAMES[pc] for pc in scale_pcs]
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels(tick_labels)
+    ax.set_xlabel("Pitch Class")
+    ax.set_ylabel("Note Count")
+    ax.set_title("Pitch Distribution (best genotype)")
+    ax.legend(loc="upper right", fontsize=8)
+    ax.grid(True, alpha=0.3, axis="y")
+
 
 def plot_evolution_history(
-    history: list[GenerationStats], save_path: Optional[str] = None
+    history: list[GenerationStats],
+    save_path: Optional[str] = None,
+    best_genotype: Optional[NetworkGenotype] = None,
+    config: Optional["EvolutionConfig"] = None,
 ):
-    """Plot evolution progress: fitness charts on top, lineage and wins on bottom."""
+    """Plot evolution progress: fitness charts on top, pitch histogram and wins on bottom."""
 
     generations = [s.generation for s in history]
     best_fitness = [s.best_fitness for s in history]
@@ -1923,105 +2020,9 @@ def plot_evolution_history(
     ax.legend(loc="best")
     ax.grid(True, alpha=0.3)
 
-    # Bottom left: Species or Lineage survival
+    # Bottom left: Per-voice pitch class histogram of best genotype
     ax = fig.add_subplot(gs[1, 0])
-
-    # Check if we have species data (speciation was enabled)
-    has_species = history and any(s.species_counts for s in history)
-
-    if has_species:
-        # Show species distribution over time
-        all_species = set()
-        for s in history:
-            all_species.update(s.species_counts.keys())
-        all_species = sorted(all_species)
-
-        # Build data matrix: (num_generations, num_species)
-        species_data = np.zeros((len(history), len(all_species)))
-        for i, s in enumerate(history):
-            for j, sp in enumerate(all_species):
-                species_data[i, j] = s.species_counts.get(sp, 0)
-
-        # Generate colors for each species
-        cmap = plt.cm.get_cmap("Set2", max(len(all_species), 8))
-        colors = [cmap(i) for i in range(len(all_species))]
-
-        # Stacked area chart
-        ax.stackplot(
-            generations,
-            species_data.T,
-            colors=colors,
-            alpha=0.8,
-            labels=[f"Species {sp}" for sp in all_species],
-        )
-
-        ax.set_xlabel("Generation")
-        ax.set_ylabel("Parents per Species")
-        ax.set_title("Species Distribution Over Generations")
-        ax.set_xlim(generations[0], generations[-1])
-        ax.set_ylim(0, species_data.sum(axis=1).max())
-        ax.legend(loc="upper left", fontsize=8)
-
-        # Note how many species at end
-        final_species = history[-1].num_species if history else 0
-        ax.text(
-            0.98,
-            0.98,
-            f"{final_species} active species",
-            transform=ax.transAxes,
-            ha="right",
-            va="top",
-            fontsize=10,
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
-        )
-    elif history and history[0].lineage_counts:
-        # Fall back to lineage chart if no species data
-        all_roots = set()
-        for s in history:
-            all_roots.update(s.lineage_counts.keys())
-        all_roots = sorted(all_roots)
-
-        # Build data matrix: (num_generations, num_roots)
-        lineage_data = np.zeros((len(history), len(all_roots)))
-        for i, s in enumerate(history):
-            for j, root in enumerate(all_roots):
-                lineage_data[i, j] = s.lineage_counts.get(root, 0)
-
-        # Generate colors for each lineage
-        cmap = plt.cm.get_cmap("tab20", len(all_roots))
-        colors = [cmap(i) for i in range(len(all_roots))]
-
-        # Stacked area chart
-        ax.stackplot(
-            generations,
-            lineage_data.T,
-            colors=colors,
-            alpha=0.8,
-        )
-
-        ax.set_xlabel("Generation")
-        ax.set_ylabel("Parents per Lineage")
-        ax.set_title("Lineage Survival Over Generations")
-        ax.set_xlim(generations[0], generations[-1])
-        ax.set_ylim(0, lineage_data.sum(axis=1).max())
-
-        # Note how many lineages survive
-        surviving_at_end = [
-            root for root in all_roots if history[-1].lineage_counts.get(root, 0) > 0
-        ]
-        ax.text(
-            0.98,
-            0.98,
-            f"{len(surviving_at_end)}/{len(all_roots)} lineages survive",
-            transform=ax.transAxes,
-            ha="right",
-            va="top",
-            fontsize=10,
-            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
-        )
-    else:
-        ax.text(0.5, 0.5, "No lineage/species data", ha="center", va="center")
-        ax.set_title("Population Diversity")
+    _plot_pitch_histogram(ax, best_genotype, config)
 
     # Bottom right: Wins over time (offspring/differentials/randoms elected to parent pool)
     ax = fig.add_subplot(gs[1, 1])
@@ -2304,7 +2305,7 @@ if __name__ == "__main__":
 
     # Plot results
     plot_path = os.path.join(config.output_dir, "evolution_history.png")
-    plot_evolution_history(history, save_path=plot_path)
+    plot_evolution_history(history, save_path=plot_path, best_genotype=best_genotype, config=config)
 
     # Save best genotype
     genotype_path = os.path.join(config.output_dir, "best_genotype.pkl")
