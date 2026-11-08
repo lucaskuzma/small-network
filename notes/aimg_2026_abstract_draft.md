@@ -66,7 +66,7 @@ Pitch entropy was replaced by *tonal gravity*, which compares the distribution o
 
 ### 3.3 Design history
 
-The fitness function and the encoding reached these forms through a series of failures, which we report because they are more informative than the final design.
+The fitness function and the encoding reached these forms through a series of failures, which we report because they are as informative as the final design.
 
 The first fitness function combined eleven metrics from the computational musicology literature with hand-tuned weights. Within 37 generations the best network outscored a set of reference ambient recordings, including Brian Eno's *Music for Airports*, on this function. The function was discarded as over-specified.
 
@@ -92,7 +92,7 @@ The MIDI output is sparse and rhythmically uneven, with bursts of activity separ
 
 The MIDI files are treated as scores and were imported into a digital audio workstation without modification. All further decisions were made by a human interpreter and fall into four categories.
 
-*Tempo.* The scores were played at 20 BPM rather than the 60 BPM used during evaluation, so that the 72-beat score lasts 3 minutes 36 seconds. The remaining 24 seconds of each movement are a fade-out that separates the movements.
+*Tempo.* The scores were played at 20 BPM, so that the 72-beat score lasts 3 minutes 36 seconds. The remaining 24 seconds of each movement are a fade-out that separates the movements.
 
 *Orchestration.* The same orchestration was used in both movements. The first voice is played by a koto. The second voice is doubled by a koto and a shamisen, and the third by two flutes. The shamisen receives its voice through a counter-based MIDI device that drops one note in every twelve in the first movement and one in every nine in the second. This device removes notes from what one instrument plays; it does not add, move, or alter notes. The shamisen is also more sparse than the koto it doubles for a second reason: the chosen instrument responds strongly to note velocity, which the network sets from the strength of the winning output (Section 2.2), so low-velocity notes are faint or nearly inaudible. No velocity remapping or filtering was applied, but the choice of this instrument acts as an implicit mapping from velocity to presence. Together, the note dropping and the velocity response make the shamisen an intermittent shadow of the koto line rather than a strict doubling.
 
