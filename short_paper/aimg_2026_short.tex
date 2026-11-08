@@ -70,9 +70,9 @@ The MIDI files are treated as scores and were imported into a digital audio work
 
 \emph{Timing drift.} On the first and second voices, every note is delayed by a few milliseconds through a MIDI delay device whose delay time is modulated by a slow low-frequency oscillator. The effect is a small, continuously varying offset from the sixteenth-note grid, similar to the timing variation of a human player. The third voice is played on the grid.
 
-\emph{Effects and mix.} Audio processing includes reverb, delay, saturation, and filtering, and the first movement adds an audio echo. In the second movement, an audio rendering of the flute voice was reversed and mixed in alongside the forward voice. The voices were balanced and placed in the stereo field.
+\emph{Effects and mix.} Audio processing includes reverb, delay, saturation, filtering, and echo. In the second movement, an audio rendering of the flute voice was reversed and mixed in alongside the forward voice. The voices were balanced and placed in the stereo field.
 
-The note data of the score is therefore identical to the network's output, while the sounding result includes doublings, omissions within doublings, small timing offsets, audio echoes, and a reversed copy of one voice, all introduced by the interpreter. The fitness function evaluated symbolic MIDI only and was never applied to audio, and no production decision was iterated against any metric. The premise of the larger project is that the notes and the sound can be separated, with computation responsible for the former and a human interpreter for the latter.
+The note data of the score is therefore identical to the network's output, while the sounding result includes doublings, omissions within doublings, small timing offsets, audio echoes, and a reversed copy of one voice, all introduced by the interpreter. The fitness function evaluated symbolic MIDI only and was never applied to audio, and no production decision was iterated against any metric. The premise of the larger project here is that the notes and the sound can be separated, with computation responsible for the former and a human interpreter for the latter.
 
 \subsection{Listening notes}
 
