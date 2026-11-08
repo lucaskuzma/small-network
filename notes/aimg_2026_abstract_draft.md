@@ -98,13 +98,13 @@ The MIDI files are treated as scores and were imported into a digital audio work
 
 *Timing drift.* On the first and second voices, in both movements, every note is delayed by a few milliseconds through a MIDI delay device whose delay time is modulated by a slow low-frequency oscillator. The effect is a small, continuously varying offset from the sixteenth-note grid, similar to the timing variation of a human player. The third voice is played on the grid. The order and grid positions of notes in the score are unchanged; only their sounding times are displaced.
 
-*Real-time effects.* Audio processing includes reverb, delay, saturation, and filtering, with some device parameters modulated by low-frequency oscillators, and the first movement adds an audio echo. In the second movement, an audio rendering of the third voice was reversed and mixed in alongside the forward voice, so that the flute line is also heard backward.
+*Real-time effects.* Audio processing includes reverb, delay, saturation, filtering, and echo, with some device parameters modulated by low-frequency oscillators. In the second movement, an audio rendering of the third voice was reversed and mixed in alongside the forward voice, so that the flute line is also heard backward.
 
 *Mix.* The voices were balanced and placed in the stereo field.
 
 The note data of the score is therefore identical to the network's output, while the sounding result includes doublings, omissions within doublings, small timing offsets on two voices, audio echoes, and, in the second movement, a reversed copy of one voice, all introduced by the interpreter. The fitness function evaluated symbolic MIDI only and was never applied to audio, and no production decision was iterated against any metric.
 
-We consider this division of labor part of the method rather than a departure from it. The compositions have an internal logic of repetition with variation and of voices converging and diverging, but the choice of weight, color, and space for each voice is what makes them legible as music. The premise of the larger project is that the notes and the sound can be separated, with computation responsible for the former and a human interpreter for the latter.
+We consider this division of labor part of the method rather than a departure from it. The compositions have an internal logic of repetition with variation and of voices converging and diverging, but the choice of weight, color, and space for each voice is what makes them legible as music. The premise of the larger project here is that the notes and the sound can be separated, with computation responsible for the former and a human interpreter for the latter.
 
 ### 4.3 Listening notes
 
