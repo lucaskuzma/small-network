@@ -58,7 +58,7 @@
     - Tempo: playback at 20 BPM, so the 72-beat score lasts 3:36 of each 4:00 track
 - **Production (from the Live sets)**
     - Some voices doubled across two instruments; one instrument of a pair receives the voice through a Max for Live "note skip" device that drops 1 of every N notes
-    - MIDI echo (Note Echo) on some voices; audio reverb, delay, saturation, filtering; LFO modulation of device parameters
+    - Note Echo with input muted and an LFO on its delay time, used as timing drift on voices 1 and 2; audio reverb, delay, saturation, filtering; LFO modulation of device parameters
     - The screenshot shown is the `ModularTrio_06` set (*Zen Garden Starfield*), which also has a reversed audio resample of the flute; confirm what the two submitted sets contain
 
 ---
@@ -108,9 +108,8 @@
 ## 4. Production disclosure (resolved)
 
 - §4.2 now has four labeled categories: tempo, orchestration, real-time effects, mix; one clause in the abstract; tempo row in Appendix B
-- State what was done: tempo 20 BPM; instruments per voice, with doubling; note-skip device on one instrument of a doubled pair; MIDI echo; audio reverb, delay, saturation, filtering, LFO modulation; mix and panning
-- State the boundary precisely: the score (MIDI clip data) is unedited; real-time devices change what is heard (doublings, notes dropped within a doubling, echoes); fitness only ever saw MIDI; production was not iterated against any metric
-- The earlier claim "no notes repeated" is withdrawn, since MIDI echo repeats notes at playback
+- State what was done: tempo 20 BPM; instruments per voice, with doubling; note-skip device on one instrument of a doubled pair; LFO timing drift on voices 1 and 2; audio reverb, delay, echo, saturation, filtering; reversed flute audio (Echo Chamber); mix and panning
+- State the boundary precisely: the score (MIDI clip data) is unedited; real-time devices change what is heard (doublings, notes dropped within a doubling, millisecond timing offsets, audio echoes, reversed audio); fitness only ever saw MIDI; production was not iterated against any metric
 - Framing: score and interpretation; the project's broader premise is that notes and sound are separable, with the human as interpreter of an algorithmic score
 
 ---
@@ -118,8 +117,7 @@
 ## 5. Open items
 
 - Resolved: selection by listening (Live scenes show the auditioned runs; the chosen ones were not the top scorers); orchestration V1 koto, V2 koto + shamisen, V3 Indian flute + clay flute in both; reversed flute audio in Echo Chamber only; last 24 s is a fade-out
-- Note Echo setting (draft §4.2 has a bracket): in the Enso screenshot it shows input Mute on, 1 ms delay, 0% feedback, with an LFO MIDI device mapped to its delay time (depth 3%, rate 1/2). If that reading is right, it adds slowly varying millisecond timing offsets to the shamisen rather than audible echoes
-- Whether the shamisen note-skip device (N = 12) is also in the Echo Chamber set (assumed yes)
+- Resolved: Note Echo (input muted, LFO on delay time) is a timing "humanization" drift on voices 1 and 2 in both movements, not an echo; voice 3 is on the grid. Shamisen note-skip is in both sets: N = 12 in Enso, N = 9 in Echo Chamber. The shamisen patch is strongly velocity-sensitive, so low-velocity notes nearly vanish; no velocity remapping, but the instrument choice acts as an implicit velocity mapping (stated in §4.2). Draft §4.2 has a separate "Timing drift" paragraph
 - Whether to include the piano-roll figure
 - Verify references marked [verify] in the draft
 - Deadline: Nov 9 vs Nov 16; check the form
