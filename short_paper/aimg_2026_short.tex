@@ -48,15 +48,35 @@ Two configurations were used. In the unified configuration, all readouts draw fr
 
 The search is a $(\mu+\lambda)$ evolution strategy~\cite{beyer2002} with $\mu = 24$, $\lambda = 120$, and 88 generations. The genome comprises reservoir and readout weights, thresholds, and refractory periods. Three fifths of the offspring come from Gaussian mutation with age-based annealing, and two fifths from differential mutation~\cite{storn1997}. There is no crossover.
 
-Fitness is a product of terms in $[0,1]$, each computed per voice and aggregated by the minimum across voices, except activity. The unified configuration was evolved under activity $\times$ diversity, where \emph{activity} rewards a target note count and \emph{diversity} combines pitch-class entropy with a penalty for repeated two- and three-note figures. The modular configuration was evolved under activity $\times$ tonal gravity $\times$ repetition $\times$ metric gravity. \emph{Tonal gravity} compares each voice's distribution of melodic transitions with a hand-written target for the scale. \emph{Metric gravity} rewards stable tones on strong beats. Definitions are in Appendix~\ref{app:fitness}, and the failures that shaped them are in Appendix~\ref{app:history}.
+Fitness is a product of terms in $[0,1]$, each computed per voice and aggregated by the minimum across voices, except activity. The unified configuration was evolved under activity $\times$ diversity, where \emph{activity} rewards a target note count and \emph{diversity} combines pitch-class entropy with a penalty for repeated two- and three-note figures. The modular configuration was evolved under activity $\times$ tonal gravity $\times$ repetition $\times$ metric gravity. \emph{Tonal gravity} compares each voice's distribution of melodic transitions with a hand-written target for the scale. \emph{Metric gravity} rewards stable tones on strong beats. Definitions are in Appendix~\ref{app:fitness}.
 
 \section{The Submitted Work}
 
-The first movement, \emph{The Enduring Enso}, comes from the modular configuration in the Kumoi scale; the second, \emph{Echo Chamber}, from the unified configuration in the Iwato scale. Each movement is four minutes long. Each evolution run yields one composition, its best MIDI file in the final generation. For each movement, compositions from several runs in the same scale were auditioned and one was kept by listening.
+\subsection{Two movements}
 
-The MIDI files were imported into a digital audio workstation without modification. The scores were played at 20~BPM, so the 72-beat score lasts 3:36, followed by a fade-out. The first voice is played by a koto, the second by a koto and a shamisen, and the third by two flutes. A counter-based device drops one note in every twelve (first movement) or nine (second movement) from the shamisen, and the velocity sensitivity of the chosen shamisen instrument makes its quiet notes nearly inaudible, so the shamisen is an intermittent shadow of the koto. On the first and second voices, a MIDI delay modulated by a slow oscillator offsets each note by a few milliseconds from the grid. Audio effects include reverb, delay, saturation, filtering, and, in the first movement, echo. In the second movement, a reversed audio rendering of the flute voice is mixed in. Details are in Appendix~\ref{app:params}.
+The submitted piece consists of two movements of four minutes each. The first, \emph{The Enduring Enso}, was produced by the modular configuration in the Kumoi scale. The second, \emph{Echo Chamber}, was produced by the unified configuration in the Iwato scale. The unified configuration was developed first; presenting the modular movement first is an artistic decision.
 
-The note data of the score is therefore identical to the network's output. Everything else about the sound, including doublings, dropped notes within a doubling, timing offsets, echoes, and the reversed voice, was introduced by the interpreter. The fitness function evaluated MIDI only and was never applied to audio.
+Each configuration was run as a batch with a fixed random seed per run: twelve runs (four per scale) for the unified configuration and nine runs (three per scale) for the modular configuration. Each run yields one composition, its best-scoring MIDI file in the final generation. No intermediate or lower-ranked outputs were considered. Selection among runs was made by listening: for each movement, the compositions from several runs in the same scale were auditioned and one was kept. The chosen runs were not the highest-scoring in their scale.
+
+The MIDI output is sparse and rhythmically uneven, with bursts of activity separated by silences, which suits a tradition in which silence carries structural weight.
+
+\subsection{Interpretation}
+
+The MIDI files are treated as scores and were imported into a digital audio workstation without modification. All further decisions were made by a human interpreter.
+
+\emph{Tempo.} The scores were played at 20~BPM, so that the 72-beat score lasts 3~minutes 36~seconds. The remaining 24~seconds of each movement are a fade-out that separates the movements.
+
+\emph{Orchestration.} The first voice is played by a koto. The second voice is doubled by a koto and a shamisen, and the third by two flutes. The shamisen receives its voice through a counter-based MIDI device that drops one note in every twelve in the first movement and one in every nine in the second. The shamisen is also sparser than the koto it doubles for a second reason: the chosen instrument responds strongly to note velocity, which the network sets from the strength of the winning output, so low-velocity notes are faint or nearly inaudible. No velocity remapping was applied, but the choice of this instrument acts as an implicit mapping from velocity to presence. Together, the note dropping and the velocity response make the shamisen an intermittent shadow of the koto line.
+
+\emph{Timing drift.} On the first and second voices, every note is delayed by a few milliseconds through a MIDI delay device whose delay time is modulated by a slow low-frequency oscillator. The effect is a small, continuously varying offset from the sixteenth-note grid, similar to the timing variation of a human player. The third voice is played on the grid.
+
+\emph{Effects and mix.} Audio processing includes reverb, delay, saturation, and filtering, and the first movement adds an audio echo. In the second movement, an audio rendering of the flute voice was reversed and mixed in alongside the forward voice. The voices were balanced and placed in the stereo field.
+
+The note data of the score is therefore identical to the network's output, while the sounding result includes doublings, omissions within doublings, small timing offsets, audio echoes, and a reversed copy of one voice, all introduced by the interpreter. The fitness function evaluated symbolic MIDI only and was never applied to audio, and no production decision was iterated against any metric. The premise of the larger project is that the notes and the sound can be separated, with computation responsible for the former and a human interpreter for the latter.
+
+\subsection{Listening notes}
+
+In the first movement, the three voices maintain distinct rhythmic identities and are anchored by C and G on strong beats; the coupling between modules can be heard as occasional entrainment between voices. In the second movement, the voices share a single pool of neurons and tend to move together, and the two half-step pairs of Iwato (C--D\fl{} and F--G\fl) recur as points of tension. In both, the silences between bursts are the primary formal device.
 
 \section{Discussion}
 
@@ -197,12 +217,5 @@ A   & 0.25 & 0.15 & 0.15 & 0.45 & --- \\
 \end{table}
 
 \textbf{Metric gravity} (movement 1). Sixteenth-note positions in a four-beat cycle receive weights $w = (4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0)$. Let $\rho$ be the weighted fraction of a voice's notes on positions with $w > 0$ whose pitch class is C or G. Then $\text{metric} = \rho / 0.5$ for $\rho \le 0.5$ and $1 - (\rho - 0.5)$ otherwise, so that neither ignoring the meter nor always playing the root is rewarded.
-
-Both recorded fitness values were reproduced by re-evaluating the submitted MIDI files with the evaluator code in effect at the time of each run.
-
-\section{Design History}
-\label{app:history}
-
-The first fitness function combined eleven musicological metrics with hand-tuned weights; within 37 generations the best network outscored reference ambient recordings, including Brian Eno's \emph{Music for Airports}, and the function was discarded as over-specified. With twelve chromatic outputs per voice, a tonal-consistency term and a pitch-diversity term were in direct conflict; reducing the outputs to five scale degrees removed both the conflict and the tonal-consistency term. A global diversity measure was satisfied by voices that each repeated a single different note, which per-voice computation corrected. A first version of tonal gravity, which scored each transition individually, was satisfied by two-note oscillations between C and D\fl{} that scored 0.94; comparing the full distribution corrected this. Adaptive trigger thresholds guaranteed a note density regardless of network behavior and were replaced by a fixed threshold. Speciation and fitness sharing did not change the results.
 
 \end{document}
