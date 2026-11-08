@@ -6,7 +6,7 @@
 
 ## Abstract
 
-We describe a compositional system in which a small spiking neural network is run as an autonomous dynamical system and shaped by evolutionary search until its spike activity, read out as notes, forms three-voice music in a Japanese pentatonic scale. The network receives no input beyond an initial stimulus and is not trained on musical data. Each of three readout layers selects one of five scale degrees per time step, so that every note the network can produce lies in the scale by construction. A (μ+λ) evolution strategy with Gaussian and differential mutation optimizes connection weights, firing thresholds, and refractory periods against a fitness function composed of four multiplicative terms: note density, agreement with a target distribution of melodic transitions, an n-gram repetition penalty, and the placement of stable tones on metrically strong positions. The system produced twelve pieces across the In-Sen, Iwato, and Kumoi scales in two configurations, one with a single shared pool of neurons and one with three loosely coupled modules, each driving one voice. The submitted work consists of two movements, one from each configuration. The evolved MIDI was not edited; instrumentation, timbre, effects, spatialization, mix, and playback tempo were decided by a human in a digital audio workstation. We describe the network, the encoding, the fitness function and the failure modes that shaped it, and the division of labor between the algorithm and the interpreter.
+We describe a compositional system in which a small spiking neural network is run as an autonomous dynamical system and shaped by evolutionary search until its spike activity, read out as notes, forms three-voice music in a Japanese pentatonic scale. The network receives no input beyond an initial stimulus and is not trained on musical data. Each of three readout layers selects one of five scale degrees per time step, so that every note the network can produce lies in the scale by construction. A (μ+λ) evolution strategy with Gaussian and differential mutation optimizes connection weights, firing thresholds, and refractory periods against a multiplicative fitness function that rewards a target note density, pitch variety, and the absence of repeated figures, and, in a later version, agreement with a target distribution of melodic transitions and the placement of stable tones on strong beats. The submitted work is a piece in two movements. The first was produced by a network of three loosely coupled modules, each driving one voice, in the Kumoi scale; the second by a network with a single shared pool of neurons in the Iwato scale. The evolved MIDI files were not edited. Orchestration, including the doubling of voices across instruments, and all real-time MIDI and audio effects, including echo and, in one movement, a reversed copy of one voice, as well as tempo and mixing, were decided by a human in a digital audio workstation. We describe the system, the failure modes that shaped it, and the division of labor between algorithm and interpreter.
 
 ## 1. Introduction
 
@@ -16,7 +16,7 @@ The architecture belongs to the family of recurrent networks studied in reservoi
 
 The search procedure is a conventional evolution strategy [5] augmented with differential mutation [6]. The decision not to use crossover follows the neuroevolution literature [7], and our own experiments confirmed that recombining two networks with coherent dynamics rarely produces a third.
 
-The relation between algorithm and performer in this project follows the model of John Cage's chance-determined scores as described by Pritchett [8]: the procedure determines what happens and when, and the performer determines what it sounds like. We apply this division literally. The network's MIDI output is the score; a human interprets it.
+The relation between algorithm and performer in this project follows the model of John Cage's chance-determined scores as described by Pritchett [8]: the procedure determines what happens and when, and the performer determines what it sounds like. We apply this division literally. The network's MIDI output is the score, and a human interprets it.
 
 The contributions of this work are modest and practical. First, a spiking reservoir is used as an autonomous sequencer, with evolution replacing readout training. Second, the pitch scale is built into the readout layer rather than imposed as an objective, which removes a conflict between tonal consistency and pitch diversity that otherwise stalls the search. Third, a compact fitness function compares each voice's full distribution of melodic transitions against a hand-specified target for the scale, which resists exploits that defeated simpler metrics. Fourth, a modular topology with a single coupling parameter yields voices with distinct rhythmic behavior while the network remains one organism under one fitness function.
 
@@ -28,51 +28,53 @@ The network consists of simple threshold neurons connected by a sparse random we
 
 Two parameters dominate the network's temporal behavior. The activation leak determines whether activity can persist across silences; a leak factor of 0.98 per step allows activity to survive gaps of tens of steps, whereas a factor of 0.90 does not. The distribution of refractory periods determines the rhythmic texture; a wide spread of periods across neurons produces activity on many time scales. Inhibitory connections proved more effective than tuning of the spectral radius for producing varied, non-saturating dynamics.
 
-The simulation is run for 288 steps, interpreted as sixteenth notes, from a single initial stimulus applied to the most strongly connected neuron in each module. No further input is provided.
+The simulation runs for 288 steps, interpreted as sixteenth notes (72 beats), after a single initial stimulus applied to the most strongly connected neuron. No further input is provided.
 
 ### 2.2 Readout and encoding
 
-Three readout layers are attached to the network, one per voice. Each readout has five output units, one per degree of the chosen pentatonic scale, connected to the reservoir through a sparse random weight pattern that is also evolved. Output units integrate the firing of their connected neurons with the same decay used for refractory activation. At each step, the output unit with the highest value in a readout triggers a note on its scale degree, provided its value exceeds a fixed threshold of 0.3. Consecutive triggers of the same degree extend the note rather than restrike it. Each voice is confined to its own octave.
+Three readout layers are attached to the network, one per voice. Each readout has five output units, one per degree of the chosen pentatonic scale, connected to the reservoir through a sparse random weight pattern that is also evolved. Output units integrate the firing of their connected neurons with a fixed decay. At each step, the output unit with the highest value in a readout sounds its scale degree, provided its value exceeds a fixed threshold of 0.3; the note's MIDI velocity is proportional to that value. If the same degree wins on consecutive steps, the note is sustained rather than restruck. Each voice is confined to its own octave.
 
 Two properties of this encoding mattered. Because the output units are scale degrees, every note is in the scale by construction, and tonal consistency need not appear in the fitness function. Because the trigger threshold is fixed rather than adaptive, the network controls its own note density. Earlier versions used percentile-based or peak-relative thresholds, which guaranteed a certain density regardless of network behavior and prevented evolution from discovering sparse textures.
 
-The scales used are In-Sen (C, D♭, F, G, B♭), Iwato (C, D♭, F, G♭, B♭), and Kumoi (C, D, E♭, G, A). Changing the scale requires changing one line of the configuration.
+The system supports the In-Sen (C, D♭, F, G, B♭), Iwato (C, D♭, F, G♭, B♭), and Kumoi (C, D, E♭, G, A) scales; changing the scale requires changing one line of the configuration.
 
-### 2.3 Modular configuration
+### 2.3 Unified and modular configurations
 
-In the first configuration, all three readouts draw from the same pool of 120 neurons. The resulting voices are coherent but tend to move together. In the second configuration, the network is partitioned into three contiguous blocks of 85 neurons, each voice's readout is restricted to one block, and a single parameter sets the ratio of inter-block to intra-block connection density. The network is still evolved as a single genome under a single fitness value, and the connections between blocks are shaped by selection like any others. As a diagnostic, we track the mean pairwise absolute correlation of the blocks' firing rates; it is determined largely by the topology and is not part of the fitness.
+In the unified configuration, all three readouts draw from a single pool of 120 neurons. The resulting voices are coherent but tend to move together. In the modular configuration, the network has 255 neurons partitioned into three contiguous blocks of 85, each voice's readout is restricted to one block, and a single parameter sets the density of connections between blocks relative to the density within them; the submitted movement used a ratio of 0.5. The network is still evolved as a single genome under a single fitness value, and the connections between blocks are shaped by selection like any others. As a diagnostic, we track the mean pairwise absolute correlation of the blocks' firing rates; it is determined largely by the topology and is not part of the fitness.
 
 ## 3. Evolution and fitness
 
 ### 3.1 Search
 
-The search is a (μ+λ) evolution strategy with μ = 24 parents and λ = 120 offspring per generation, run for 88 generations. The genome comprises the reservoir weights, the readout weights, the firing thresholds, and the integer refractory periods. Three fifths of the offspring are produced by Gaussian mutation of a single parent, divided among five groups that anneal the mutation rate or scale upward or downward as a function of how many generations the parent has survived without improvement. The remaining two fifths are produced by differential mutation: the base parent is moved by a scaled difference between two other parents of unequal fitness. The differential step is large while the population is diverse and shrinks as it converges. No crossover and no random immigrants are used.
+The search is a (μ+λ) evolution strategy with μ = 24 parents and λ = 120 offspring per generation, run for 88 generations. The genome comprises the reservoir weights, the readout weights, the firing thresholds, and the integer refractory periods. Three fifths of the offspring are produced by Gaussian mutation of a single parent, divided among five groups that anneal the mutation rate or scale upward or downward as a function of how many generations the parent has survived without improvement. The remaining two fifths are produced by differential mutation: the base parent is moved by a scaled difference between two other parents of unequal fitness. The differential step is large while the population is diverse and shrinks as it converges. No crossover and no random immigrants are used. Search settings were identical for both configurations.
 
 ### 3.2 Fitness
 
-The fitness of a MIDI file is the product of four terms, each in [0, 1]. Each term is computed per voice, and the minimum across voices is taken, so that a single deficient voice determines the score. Definitions are given in Appendix C.
+Fitness is computed from the MIDI output as a product of terms, each in [0, 1]. Every term except activity is computed per voice, and the minimum across voices is taken, so that a single deficient voice determines the score. The product form means each term acts as a gate: a voice that excels on one term and fails another scores near zero. Definitions are given in Appendix C.
 
-*Activity* measures the total note count against a target equal to the number of simulation steps, decreasing linearly with the absolute log-ratio between the two. Silence and saturation are penalized symmetrically.
+Two versions of the fitness function were used. The unified configuration was evolved under
 
-*Tonal gravity* compares the distribution of a voice's melodic transitions, over the twenty ordered pairs of distinct scale degrees, with a target distribution written by hand for each scale. The targets encode the characteristic motion of the scale: the half-step between C and D♭ in In-Sen, the two half-step pairs in Iwato, and the D–E♭ color against the C–G fifth in Kumoi. Agreement is measured as the exponential of the negative Kullback–Leibler divergence from target to observed, with additive smoothing. Because the target assigns probability to all twenty transition types, a voice that uses only a few is heavily penalized; the term therefore also enforces pitch variety.
+    fitness = activity × diversity.
 
-*Repetition* penalizes a voice whose most frequent two- or three-note sequence accounts for a large share of all its sequences, with two occurrences permitted before the penalty applies.
+*Activity* measures the total note count against a target equal to the number of simulation steps, decreasing linearly with the absolute log-ratio between the two, so that silence and saturation are penalized symmetrically. *Diversity* is the mean of two components: the normalized entropy of the voice's pitch-class distribution, and a *repetition* score that penalizes a voice whose most frequent two- or three-note sequence accounts for a large share of all its sequences, with two occurrences permitted before the penalty applies.
 
-*Metric gravity*, used only in the modular configuration, scores a voice's tendency to place the root or fifth (the fourth, for Iwato) on metrically strong sixteenth-note positions, weighted by a binary-subdivision pattern over a four-beat cycle. The score peaks when about half of the strong-position notes are stable tones, so that neither ignoring the meter nor playing the root on every downbeat is rewarded.
+The modular configuration was evolved under
 
-The product form means each term acts as a gate. A network with lively rhythm and no tonal center scores near zero, as does one that lands on the root at every downbeat but repeats a two-note figure.
+    fitness = activity × tonal gravity × repetition × metric gravity.
+
+Pitch entropy was replaced by *tonal gravity*, which compares the distribution of a voice's melodic transitions, over the twenty ordered pairs of distinct scale degrees, with a target distribution written by hand for each scale. The targets encode the characteristic motion of the scale; for Kumoi, the half-step between D and E♭ is weighted against the structural fifth C–G. Agreement is measured as the exponential of the negative Kullback–Leibler divergence from target to observed, with additive smoothing. Because the target assigns probability to all twenty transition types, a voice that uses only a few is heavily penalized, so the term also enforces pitch variety. *Metric gravity* scores a voice's tendency to place stable tones (C and G for Kumoi) on metrically strong sixteenth-note positions, weighted by a binary-subdivision pattern over a four-beat cycle. The score peaks when about half of the strong-position notes are stable tones, so that neither ignoring the meter nor playing the root on every downbeat is rewarded. Metric gravity was added because the more independent voices of the modular network lacked a shared sense of downbeat and tonal center.
 
 ### 3.3 Design history
 
-The fitness function and the encoding reached this form through a series of failures, which we report because they are more informative than the final design.
+The fitness function and the encoding reached these forms through a series of failures, which we report because they are more informative than the final design.
 
-The first fitness function combined eleven metrics from the computational musicology literature with hand-tuned weights. Within 37 generations the best network outscored a set of reference ambient recordings, including Brian Eno's *Music for Airports*, on this function. The function was discarded as over-specified and replaced by two or three terms.
+The first fitness function combined eleven metrics from the computational musicology literature with hand-tuned weights. Within 37 generations the best network outscored a set of reference ambient recordings, including Brian Eno's *Music for Airports*, on this function. The function was discarded as over-specified.
 
 With twelve chromatic output units per voice, a tonal-consistency term and a pitch-diversity term were in direct conflict: every additional pitch class in use was another opportunity to leave the scale. Evolution settled on a trade-off that satisfied neither. Reducing the output layer to the five scale degrees removed the conflict and the tonal-consistency term together.
 
 A global diversity measure was satisfied by networks in which each voice repeated a single note, since the voices chose different notes. Computing the measure per voice and taking the minimum closed this exploit.
 
-An earlier tonal-gravity term scored each transition individually against the target row for its origin. Networks converged on two-note oscillations between C and D♭, scoring 0.94 on the term while producing music no one would want to hear. The term could not see that eighteen of twenty transition types never occurred. Comparing the full joint distribution corrected this.
+A first version of tonal gravity scored each transition individually against the target row for its origin. Networks converged on two-note oscillations between C and D♭, scoring 0.94 on the term while producing music no one would want to hear. The term could not detect that eighteen of twenty transition types never occurred. Comparing the full joint distribution corrected this.
 
 Finally, lineage tracking showed that one ancestral line typically dominated the parent pool within five generations. Speciation and fitness sharing were tried and did not change the music. The limiting factor was the fitness landscape, not the diversity of the population.
 
@@ -80,25 +82,37 @@ Finally, lineage tracking showed that one ancestral line typically dominated the
 
 ### 4.1 Two movements
 
-The submitted piece consists of two movements, eight minutes in total. The first, *The Enduring Enso*, comes from the modular configuration in the [TODO: scale] scale. The second, *Echo Chamber*, comes from the unified configuration in the [TODO: scale] scale. Presenting the modular network first and the unified network second is an artistic decision rather than a chronological one.
+The submitted piece consists of two movements of four minutes each. The first, *The Enduring Enso*, was produced by the modular configuration in the Kumoi scale. The second, *Echo Chamber*, was produced by the unified configuration in the Iwato scale. The unified configuration was developed first; presenting the modular movement first is an artistic decision.
 
-Once each configuration was fixed, twelve evolution runs were executed, four per scale, and the best-of-run MIDI file of each was taken as a composition. The pieces were not selected from a larger pool. The MIDI output is sparse and rhythmically uneven, with bursts of activity separated by silences, which suits a tradition in which silence carries structural weight.
+Each configuration was run as a batch with a fixed random seed per run: twelve runs (four per scale) for the unified configuration and nine runs (three per scale) for the modular configuration. Each run yields one composition, its best-scoring MIDI file in the final generation. No intermediate or lower-ranked outputs were considered. Selection among runs was made by listening: for each movement, the compositions from several runs in the same scale were auditioned in the digital audio workstation and one was kept. The chosen runs were not the highest-scoring in their scale. The recorded fitness of the first movement is 0.79 and that of the second is 0.91; because the two were evaluated under different fitness functions, the values are not comparable.
+
+The MIDI output is sparse and rhythmically uneven, with bursts of activity separated by silences, which suits a tradition in which silence carries structural weight.
 
 ### 4.2 Interpretation
 
-The MIDI files are treated as scores. In a digital audio workstation, each voice was assigned an instrument and processed through effects—reverb, delay, saturation, and filtering—and the three voices were placed in a stereo field and mixed. The playback tempo was [TODO: tempo], which extends the 288-step score to four minutes. [TODO: one sentence on instruments, if desired.] No notes were added, removed, moved, revoiced, or repeated; the note data in the recording is identical to the network's output. The fitness function evaluated symbolic MIDI only and was never applied to audio, and the production was not iterated against any metric.
+The MIDI files are treated as scores and were imported into a digital audio workstation without modification. All further decisions were made by a human interpreter and fall into four categories.
 
-We consider this division of labor part of the method rather than a departure from it. The compositions have an internal logic—repetition with variation, voices converging and diverging—but, as with Cage's chance-determined scores, the choice of weight, color, and space for each voice is what makes them legible as music. The premise of the larger project is that the notes and the sound can be separated, with computation responsible for the former and a human interpreter for the latter.
+*Tempo.* The scores were played at 20 BPM rather than the 60 BPM used during evaluation, so that the 72-beat score lasts 3 minutes 36 seconds. The remaining 24 seconds of each movement are a fade-out that separates the movements.
+
+*Orchestration.* The same orchestration was used in both movements. The first voice is played by a koto. The second voice is doubled by a koto and a shamisen, and the third by two flutes. The shamisen receives its voice through a counter-based MIDI device that drops one note in every twelve, so that the doubled instruments share the line without playing in strict unison. This device removes notes from what one instrument plays; it does not add, move, or alter notes.
+
+*Real-time effects.* A MIDI echo device is present on some voices [describe its setting; see note below]. Audio processing includes reverb, delay, saturation, and filtering, with some device parameters modulated by low-frequency oscillators, and the first movement adds an audio echo. In the second movement, an audio rendering of the third voice was reversed and mixed in alongside the forward voice, so that the flute line is also heard backward.
+
+*Mix.* The voices were balanced and placed in the stereo field.
+
+The note data of the score is therefore identical to the network's output, while the sounding result includes doublings, omissions within doublings, echoes, and, in the second movement, a reversed copy of one voice, all introduced by the interpreter. The fitness function evaluated symbolic MIDI only and was never applied to audio, and no production decision was iterated against any metric.
+
+We consider this division of labor part of the method rather than a departure from it. The compositions have an internal logic of repetition with variation and of voices converging and diverging, but, as with Cage's chance-determined scores, the choice of weight, color, and space for each voice is what makes them legible as music. The premise of the larger project is that the notes and the sound can be separated, with computation responsible for the former and a human interpreter for the latter.
 
 ### 4.3 Listening notes
 
-In the first movement, the three voices maintain distinct rhythmic identities and are anchored by stable tones on strong beats; the inter-module coupling can be heard as occasional entrainment between voices. In the second movement, the voices share a single pool of neurons and tend to move together, converging and diverging as a group. In both, the half-step gestures that define the scale recur as points of tension and release, and the silences between bursts are the primary formal device.
+In the first movement, the three voices maintain distinct rhythmic identities and are anchored by C and G on strong beats; the coupling between modules can be heard as occasional entrainment between voices. In the second movement, the voices share a single pool of neurons and tend to move together, converging and diverging as a group, and the two half-step pairs of Iwato (C–D♭ and F–G♭) recur as points of tension. In both, the silences between bursts are the primary formal device.
 
 ## 5. Discussion
 
-Several conclusions held across the project. The network's physical parameters—leak, refractory period distribution, sparsity, weight scale—determined the reachable musical space more than any property of the search; a change in the leak factor from 0.90 to 0.98 had a greater effect than any mutation scheme. The encoding of network state as notes had a greater effect than the fitness function; building the scale into the readout was the single most consequential change. Evolution of a chaotic spiking system is difficult because most mutations are destructive; mutation scales had to be set two orders of magnitude below typical weight values, and differential mutation helped by following the structure of the population rather than sampling noise. Every addition of complexity—more metrics, more output units, adaptive thresholds, speciation—degraded the results.
+Several conclusions held across the project. The network's physical parameters, namely leak, refractory period distribution, sparsity, and weight scale, determined the reachable musical space more than any property of the search; a change in the leak factor from 0.90 to 0.98 had a greater effect than any mutation scheme. The encoding of network state as notes had a greater effect than the fitness function, and building the scale into the readout was the single most consequential change. Evolution of a chaotic spiking system is difficult because most mutations are destructive; mutation scales had to be set more than an order of magnitude below typical weight values, and differential mutation helped by following the structure of the population rather than sampling noise. Every addition of complexity, including more metrics, more output units, adaptive thresholds, and speciation, degraded the results.
 
-The limitations are plain. The pieces have local coherence but no large-scale form; there is no development or arc, which is acceptable for a static, meditative idiom and would not be elsewhere. The transition targets encode the author's understanding of the scales and are a form of curation, not learned style. The fitness terms are proxies, and no listening study was conducted.
+The limitations are plain. The pieces have local coherence but no large-scale form; there is no development or arc, which is acceptable for a static, meditative idiom and would not be elsewhere. The two movements were evolved under different fitness functions and network sizes, so they document two stages of the system rather than a controlled comparison. The transition targets encode the author's understanding of the scales and are a form of curation, not learned style. The fitness terms are proxies, and no listening study was conducted.
 
 ## References
 
@@ -136,45 +150,42 @@ a            = a * activation_leak
 r            = max(0, r_new - 1)
 ```
 
-Per readout, the note at this step is `argmax(o[readout])` if `max(o[readout]) > 0.3`, else none.
+Per readout, the step's note is the scale degree at `argmax(o[readout])` if `max(o[readout]) > 0.3`, with velocity `round(127 · max(o[readout]))`; otherwise the voice is silent. A degree that wins on consecutive steps is sustained.
 
-## Appendix B. Hyperparameters
+## Appendix B. Parameters
 
-| Parameter | Unified (second movement) | Modular (first movement) |
+| Parameter | Movement 1 (modular) | Movement 2 (unified) |
 | --- | --- | --- |
-| Neurons | 120 | 255 (3 × 85) |
-| Modules | 1 | 3 |
-| Inter-/intra-module connection density ratio | — | [TODO: 0.1 or 0.5] |
-| Readouts (voices) | 3 | 3 |
-| Outputs per readout | 5 | 5 |
-| Reservoir sparsity | 0.2 | 0.2 |
-| Reservoir weight scale (std.) | 0.3 | 0.3 |
-| Readout sparsity | 0.05 | 0.05 |
-| Readout weight scale (std.) | 0.3 | 0.3 |
+| Scale | Kumoi (C, D, E♭, G, A) | Iwato (C, D♭, F, G♭, B♭) |
+| Neurons | 255 (3 × 85) | 120 |
+| Modules | 3 | 1 |
+| Inter-/intra-module connection density ratio | 0.5 | — |
+| Readouts (voices) × outputs per readout | 3 × 5 | 3 × 5 |
+| Reservoir sparsity / weight scale (std.) | 0.2 / 0.3 | 0.2 / 0.3 |
+| Readout sparsity / weight scale (std.) | 0.05 / 0.3 | 0.05 / 0.3 |
 | Activation leak | 0.98 | 0.98 |
 | Refraction leak | 0.75 | 0.75 |
-| Refractory period | 2 + U{0, …, 61} | 2 + U{0, …, 61} |
-| Weight threshold | 0 (disabled) | 0 (disabled) |
+| Refractory period (steps) | 2 + U{0, …, 61} | 2 + U{0, …, 61} |
 | Argmax trigger threshold | 0.3 | 0.3 |
-| Simulation steps | 288 | 288 |
-| Step duration | sixteenth note | sixteenth note |
-| Evaluation tempo | 60 BPM | 60 BPM |
-| Playback tempo (DAW) | [TODO] | [TODO] |
-| μ / λ | 24 / 120 | 24 / 120 |
-| Generations | 88 | 88 |
+| Initial stimulus | most strongly connected neuron | most strongly connected neuron |
+| Simulation steps (sixteenth notes) | 288 | 288 |
+| Tempo during evaluation / playback | 60 / 20 BPM | 60 / 20 BPM |
+| μ / λ / generations | 24 / 120 / 88 | 24 / 120 / 88 |
 | Weight mutation rate / scale | 0.1 / 0.01 | 0.1 / 0.01 |
 | Threshold mutation rate / scale | 0.1 / 0.01 | 0.1 / 0.01 |
 | Refractory period mutation rate | 0.1 | 0.1 |
 | Annealing factor / maximum multiplier | 0.1 / 10 | 0.1 / 10 |
-| Offspring split (Gaussian : differential) | 3 : 2 | 3 : 2 |
-| Differential factor F | 0.7 | 0.7 |
-| Fitness | act × ton × rep | act × ton × rep × met |
+| Offspring split (Gaussian : differential), F | 3 : 2, 0.7 | 3 : 2, 0.7 |
+| Fitness | act × ton × rep × met | act × div |
+| Runs in batch | 9 (3 per scale) | 12 (4 per scale) |
+| Orchestration (voices 1 / 2 / 3) | koto / koto + shamisen / two flutes | koto / koto + shamisen / two flutes, plus reversed flute audio |
+| Recorded fitness of submitted output | 0.79 | 0.91 |
 
 ## Appendix C. Fitness definitions
 
-All terms are computed per voice and aggregated by the minimum across voices. A voice with fewer than four notes scores 0 on tonal and metric gravity.
+Every term except activity is computed per voice and aggregated by the minimum across voices.
 
-**Activity.** With `n` the total note count and `T = 288` the target,
+**Activity.** With `n` the total note count across voices and `T = 288` the target,
 
 ```
 activity = max(0, 1 − |log2(n / T)| / 2)
@@ -182,37 +193,29 @@ activity = max(0, 1 − |log2(n / T)| / 2)
 
 so that a count of `T/2` or `2T` scores 0.5 and `T/4` or `4T` scores 0.
 
-**Tonal gravity.** Let `q` be the target distribution over the 20 ordered pairs of distinct scale degrees, and `p` the observed distribution of a voice's non-repeating transitions after additive smoothing with α = 1. Voices with fewer than 8 transitions score 0. Otherwise
+**Repetition.** For k ∈ {2, 3}, let `c_max` be the count of the most frequent k-gram of pitch classes in the voice and `N` the number of k-grams. With two occurrences allowed,
+
+```
+penalty_k   = (max(0, c_max − 2) / (N − 2))^2
+repetition  = mean(1 − penalty_2, 1 − penalty_3)
+```
+
+**Diversity** (movement 2). With `H` the Shannon entropy in bits of the voice's pitch-class distribution,
+
+```
+entropy    = min(1, H / log2(7))
+diversity  = 0.5 · entropy + 0.5 · repetition
+```
+
+The normalization by log2(7) is carried over from the earlier seven-note version of the system; for a five-note scale the entropy component cannot exceed log2(5)/log2(7) ≈ 0.83.
+
+**Tonal gravity** (movement 1). Let `q` be the target distribution over the 20 ordered pairs of distinct scale degrees, and `p` the observed distribution of a voice's transitions between distinct degrees, with additive smoothing α = 1. A voice with fewer than four notes or fewer than eight such transitions scores 0. Otherwise
 
 ```
 tonal_gravity = exp(−KL(q ‖ p)) = exp(−Σ q_i log(q_i / p_i))
 ```
 
-Target matrices (rows: from; columns: to; diagonal excluded, rows sum to 1):
-
-In-Sen (C, D♭, F, G, B♭):
-
-```
-         C     Db    F     G     Bb
-C      0.00  0.40  0.25  0.20  0.15
-Db     0.45  0.00  0.25  0.15  0.15
-F      0.20  0.15  0.00  0.35  0.30
-G      0.20  0.10  0.30  0.00  0.40
-Bb     0.35  0.20  0.20  0.25  0.00
-```
-
-Iwato (C, D♭, F, G♭, B♭):
-
-```
-         C     Db    F     Gb    Bb
-C      0.00  0.40  0.20  0.15  0.25
-Db     0.45  0.00  0.25  0.10  0.20
-F      0.15  0.10  0.00  0.45  0.30
-Gb     0.15  0.10  0.45  0.00  0.30
-Bb     0.35  0.15  0.25  0.25  0.00
-```
-
-Kumoi (C, D, E♭, G, A):
+Kumoi target (rows: from; columns: to; rows sum to 1):
 
 ```
          C     D     Eb    G     A
@@ -223,24 +226,13 @@ G      0.30  0.15  0.10  0.00  0.45
 A      0.25  0.15  0.15  0.45  0.00
 ```
 
-[Keep only the two matrices for the scales actually used in the submitted movements.]
-
-**Repetition.** For n ∈ {2, 3}, let `c_max` be the count of the most frequent n-gram of scale degrees in the voice and `N` the number of n-grams. With two occurrences allowed,
-
-```
-excess   = max(0, c_max − 2)
-penalty  = (excess / (N − 2))^2
-score_n  = 1 − penalty
-repetition = mean(score_2, score_3)
-```
-
-**Metric gravity** (modular configuration only). Sixteenth-note positions within a four-beat cycle receive weights
+**Metric gravity** (movement 1). Sixteenth-note positions within a four-beat cycle receive weights
 
 ```
 w = [4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0]
 ```
 
-Let `ρ` be the weighted fraction of notes on positions with `w > 0` whose pitch class is a stable tone (C and G for In-Sen and Kumoi; C and F for Iwato). Then
+Let `ρ` be the weighted fraction of a voice's notes on positions with `w > 0` whose pitch class is a stable tone (C or G for Kumoi). Then
 
 ```
 metric_gravity = ρ / 0.5                     if ρ ≤ 0.5
@@ -250,7 +242,8 @@ metric_gravity = ρ / 0.5                     if ρ ≤ 0.5
 **Composite.**
 
 ```
-fitness = activity × tonal_gravity × repetition × metric_gravity
+movement 1:  fitness = activity × tonal_gravity × repetition × metric_gravity
+movement 2:  fitness = activity × diversity
 ```
 
-with `metric_gravity = 1` for the unified configuration.
+Both recorded fitness values were reproduced by re-evaluating the submitted MIDI files with the evaluator code in effect at the time of each run.

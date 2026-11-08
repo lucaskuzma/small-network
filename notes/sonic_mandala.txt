@@ -12,7 +12,7 @@ Koto's Resonance
 2 _ Trio_05-194507_kumoi.wav  42.3MB
 
 
-Echo Chamber
+Echo Chamber <
 3 _ Trio_06_192932_iwato.wav  42.3MB
 
 
@@ -24,7 +24,7 @@ Zen Garden Starfield
 5 _ ModularTrio_06-171628_iwato_4s.wav  42.3MB
 
 
-The Enduring Enso
+The Enduring Enso <
 6 _ ModularTrio_05_173617-kumoi_4s.wav  42.3MB
 
 
