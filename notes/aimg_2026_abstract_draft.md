@@ -12,11 +12,11 @@ We describe a compositional system in which a small spiking neural network is ru
 
 Most generative music systems based on neural networks are trained to approximate a mapping from an input to an output, and composition is performed by sampling from the trained model. This work takes a different position. The network is treated as a physical system with its own dynamics, and the question is whether evolutionary pressure can shape those dynamics into something a listener would accept as music. The composition is encoded in the weights and topology of the network rather than in any input or dataset.
 
-The architecture belongs to the family of recurrent networks studied in reservoir computing. Maass, Natschläger, and Markram [1] proposed that a recurrent circuit of spiking neurons, the "liquid," can serve as a generic high-dimensional dynamical system from which readout units extract useful signals. Jaeger's echo state networks [2] apply the same separation to rate-based units. Both frameworks assume an input stream and a trained readout. Here the reservoir runs freely after a single initial stimulus, and evolution, rather than regression, determines both the reservoir and the readout. Kiefer [3] examined echo state networks as mapping tools for musical instruments and treated the spectral radius of the reservoir as a controllable gain; our observations about the role of inhibitory connections and refractory periods are in the same spirit. The Continuous Thought Machine of Darlow et al. [4] motivated our early experiments with neuron synchronization as a readout signal.
+The architecture belongs to the family of recurrent networks studied in reservoir computing. Maass, Natschläger, and Markram [1] proposed that a recurrent circuit of spiking neurons, the "liquid," can serve as a generic high-dimensional dynamical system from which readout units extract useful signals. Jaeger's echo state networks [2] apply the same separation to rate-based units, and Jaeger also demonstrated that a trained echo state network can generate signals autonomously, without input. In both frameworks the reservoir is random and fixed, and the readout is trained by regression against target data. In the present system no musical training data is used: evolution determines both the reservoir and the readout, and the network runs freely after a single initial stimulus. Kiefer [3] examined echo state networks as mapping tools for musical instruments and treated the spectral radius of the reservoir as a controllable gain; our observations about the role of inhibitory connections and refractory periods are in the same spirit. The Continuous Thought Machine of Darlow et al. [4] motivated our early experiments with neuron synchronization as a readout signal.
 
-The search procedure is a conventional evolution strategy [5] augmented with differential mutation [6]. The decision not to use crossover follows the neuroevolution literature [7], and our own experiments confirmed that recombining two networks with coherent dynamics rarely produces a third.
+The search procedure is a conventional evolution strategy [5] augmented with differential mutation [6]. As in several earlier neuroevolution methods, offspring are produced by mutation only [7, §2.1.3].
 
-The relation between algorithm and performer in this project follows the model of John Cage's chance-determined scores as described by Pritchett [8]: the procedure determines what happens and when, and the performer determines what it sounds like. We apply this division literally. The network's MIDI output is the score, and a human interprets it.
+The division of labor between algorithm and interpreter was inspired by John Cage, some of whose chance compositions leave decisions to the performer [8]. Here the network's MIDI output is the score, and a human interprets it.
 
 The contributions of this work are modest and practical. First, a spiking reservoir is used as an autonomous sequencer, with evolution replacing readout training. Second, the pitch scale is built into the readout layer rather than imposed as an objective, which removes a conflict between tonal consistency and pitch diversity that otherwise stalls the search. Third, a compact fitness function compares each voice's full distribution of melodic transitions against a hand-specified target for the scale, which resists exploits that defeated simpler metrics. Fourth, a modular topology with a single coupling parameter yields voices with distinct rhythmic behavior while the network remains one organism under one fitness function.
 
@@ -104,7 +104,7 @@ The MIDI files are treated as scores and were imported into a digital audio work
 
 The note data of the score is therefore identical to the network's output, while the sounding result includes doublings, omissions within doublings, small timing offsets on two voices, audio echoes, and, in the second movement, a reversed copy of one voice, all introduced by the interpreter. The fitness function evaluated symbolic MIDI only and was never applied to audio, and no production decision was iterated against any metric.
 
-We consider this division of labor part of the method rather than a departure from it. The compositions have an internal logic of repetition with variation and of voices converging and diverging, but, as with Cage's chance-determined scores, the choice of weight, color, and space for each voice is what makes them legible as music. The premise of the larger project is that the notes and the sound can be separated, with computation responsible for the former and a human interpreter for the latter.
+We consider this division of labor part of the method rather than a departure from it. The compositions have an internal logic of repetition with variation and of voices converging and diverging, but the choice of weight, color, and space for each voice is what makes them legible as music. The premise of the larger project is that the notes and the sound can be separated, with computation responsible for the former and a human interpreter for the latter.
 
 ### 4.3 Listening notes
 
@@ -120,20 +120,15 @@ The limitations are plain. The pieces have local coherence but no large-scale fo
 
 [1] W. Maass, T. Natschläger, and H. Markram, "Real-time computing without stable states: A new framework for neural computation based on perturbations," *Neural Computation*, vol. 14, no. 11, pp. 2531–2560, 2002.
 
-[2] H. Jaeger, "The 'echo state' approach to analysing and training recurrent neural networks," GMD Report 148, German National Research Center for Information Technology, 2001. [verify]
-
+[2] H. Jaeger, "The 'echo state' approach to analysing and training recurrent neural networks," GMD Report 148, German National Research Center for Information Technology, 2001.
 [3] C. Kiefer, "Musical instrument mapping design with echo state networks," in *Proc. Int. Conf. New Interfaces for Musical Expression (NIME)*, London, 2014, pp. 293–298.
 
 [4] L. Darlow, C. Regan, S. Risi, J. Seely, and L. Jones, "Continuous thought machines," arXiv:2505.05522, 2025; also in *Advances in Neural Information Processing Systems*, 2025.
 
-[5] H.-G. Beyer and H.-P. Schwefel, "Evolution strategies: A comprehensive introduction," *Natural Computing*, vol. 1, no. 1, pp. 3–52, 2002. [verify]
-
-[6] R. Storn and K. Price, "Differential evolution: A simple and efficient heuristic for global optimization over continuous spaces," *Journal of Global Optimization*, vol. 11, no. 4, pp. 341–359, 1997. [verify]
-
-[7] K. O. Stanley and R. Miikkulainen, "Evolving neural networks through augmenting topologies," *Evolutionary Computation*, vol. 10, no. 2, pp. 99–127, 2002. [verify]
-
-[8] J. Pritchett, *The Music of John Cage*. Cambridge, U.K.: Cambridge University Press, 1993. [verify]
-
+[5] H.-G. Beyer and H.-P. Schwefel, "Evolution strategies: A comprehensive introduction," *Natural Computing*, vol. 1, no. 1, pp. 3–52, 2002.
+[6] R. Storn and K. Price, "Differential evolution: A simple and efficient heuristic for global optimization over continuous spaces," *Journal of Global Optimization*, vol. 11, no. 4, pp. 341–359, 1997.
+[7] K. O. Stanley and R. Miikkulainen, "Evolving neural networks through augmenting topologies," *Evolutionary Computation*, vol. 10, no. 2, pp. 99–127, 2002.
+[8] J. Pritchett, *The Music of John Cage*. Cambridge, U.K.: Cambridge University Press, 1993.
 ---
 
 ## Appendix A. Update rule
