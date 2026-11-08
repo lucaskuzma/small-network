@@ -1,206 +1,117 @@
-# AIMG 2026 — Composition Abstract Outline
+# AIMG 2026 — Composition Abstract Outline (rev. 2)
 
 **Target:** AI Music Composition Competition, AIMG 2026 (Cross-AI Symposium 2026 / IEEE Big Data 2026)
-**AoE Deadline**: End of day on November 9, 2026, in the UTC-12 time zone.
-**Berlin Deadline:** Berlin Time (CET, UTC+1): November 10, 2026, at 1:00 PM. [note, corrected deadline]
-**Sources reviewed:** repo + `notes/`, `Codex 2601.md`, the.strange.agency project page and "Modular Network" post, Bandcamp album page, AIMG 2026 call (current page + ACL CFP mirror + AIMG 2025 guidelines)
+**Deadline (per your correction):** November 9, 2026 AoE = November 10, 2026, 13:00 Berlin. Note: the workshop page lists Nov 16 for compositions under the Cross-AI dates and Nov 9 for papers; trust the AirBalloon form.
+**Draft:** `notes/aimg_2026_abstract_draft.md`
+**Sources:** repo + `notes/`, `Codex 2601.md`, project page, "Modular Network" post, Bandcamp page, AIMG 2026 call (current page, ACL CFP mirror, AIMG 2025 guidelines), `params.txt` of all run folders, `network.py`, `eval_basic.py`, `utils_sonic.py`
 
 ---
 
-## 0. What they are actually asking for
+## 0. Requirements and decisions
 
-- **It is a short paper, not a 250-word abstract**
-    - 1–2 pages in **IEEE conference (two-column) format**, PDF
-    - Optional **appendix up to 2 pages** (counts toward total), optional sheet music up to 9 pages; everything combined ≤ 10 pages
-    - Budget: ~1,400–1,800 words for 2 pages with 1–2 small figures; appendix absorbs tables and extra plots
-- **Review is double-blind**
-    - No author names, no links to the.strange.agency, GitHub, or the Bandcamp page in the body
-    - Do not use "The Psychic Geometries Trio" or "Sonic Mandala" as identifiers (both resolve to you in one search); the "three members, one nervous system" hook is fine if de-branded
-    - Audio must be a shareable MP3/MP4 link ≤ 10 min: use an anonymous host (unlisted Drive/Dropbox/SoundCloud) rather than Bandcamp
-- **Eligibility clause**
-    - "Not created using AI or algorithmic methods" → ineligible; "human-enhanced AI-generated scores" explicitly allowed
-    - So: the human production pass is permitted, but the abstract must make clear where the algorithm stops and the human begins
-- **Audio selection** (4:00 per track → two tracks = 8:00, under cap)
-    - Recommended: one Side A track (unified network) + one Side B track (modular), ideally different scales, so the pair illustrates the architectural change described in the text [yes, i will combine two tracks into a piece with two movements]
-    - Alternative: a single Side B track if the competition expects one composition per entry (check the AirBalloon form; if unclear, submit the pair as one two-movement entry and say so)
-    - **TODO (you):** map Bandcamp track titles → side (A/B), scale (In-Sen / Iwato / Kumoi), and run folder in `evolve_midi_modular/` / `evolve_midi/` [this will be hard, not sure it's necessary to match the run]
+- **Format**
+    - 1–2 pages IEEE two-column, PDF, double-blind; optional appendix ≤ 2 pages; total ≤ 10 pages
+    - AirBalloon "abstract" field is a plain-text summary of the PDF; paste the abstract paragraph (~150 words); `$...$` math is supported but unnecessary
+    - Body budget ~1,500 words; appendix ~1 page, built only from material that already exists as text in the repo
+- **Anonymity**
+    - No author names; no links to the.strange.agency, GitHub, or Bandcamp; no "Psychic Geometries Trio" or "Sonic Mandala"
+    - Track titles are not identifying on their own; use "first movement" / "second movement" in the body and give titles once
+    - Audio: upload the MP3 directly if the form allows; otherwise a private link from a neutral SoundCloud account (Drive/Dropbox expose the account name)
+- **Eligibility**
+    - "Human-enhanced AI-generated scores" explicitly allowed; disclose the production stage and the boundary (MIDI untouched)
+- **Submission** (decided)
+    - One entry, one piece in two movements, 8:00 total: "The Enduring Enso" (modular network) followed by "Echo Chamber" (unified network); order is an artistic decision and is stated as such
+    - No track → run → seed matching; the paper describes the two system configurations, not two specific runs
 
 ---
 
-## 1. Title + one-line summary
+## 1. Corrections from the code (supersede the project page)
 
-- **Working title options**
-    - _Grown, Not Written: Evolving a 256-Neuron Spiking Network to Compose in Japanese Pentatonic Modes_
-    - _A Small Nervous System as Sequencer: Neuroevolved Spiking Networks for Three-Voice Pentatonic Music_ [this is best]
-    - _Reservoir as Composer: Autonomous Spiking Dynamics, Evolutionary Fitness, and Human Interpretation_
-- **One-sentence pitch (for the first paragraph and the AirBalloon summary field)**
-    - A tiny, untrained spiking neural network is run as an autonomous dynamical system; evolution shapes its weights so its spike readouts form three-voice pentatonic music; a human then interprets the resulting MIDI score in the studio
-- **Keywords**
-    - spiking neural networks, neuroevolution, reservoir computing, algorithmic composition, symbolic music evaluation, pentatonic scales, human–AI co-creation
-
----
-
-## 2. Abstract paragraph (~150 words)
-
-- **Problem / stance**
-    - Most AI music is a trained model mapping input → output; here the network is treated as a physical system with its own dynamics, with no training data, no gradients, no input
-- **Method in one breath**
-    - 255–256 [use what the code says, notes were probably power of 2 shorthand] leaky threshold neurons, excitatory + inhibitory weights, refractory periods; three readout "voices" map argmax activation to a 5-note scale; (μ+λ) evolution with Gaussian and differential mutation; multiplicative fitness: activity × tonal gravity × repetition × metric gravity
-- **Result**
-    - Twelve evolved pieces across In-Sen, Iwato, Kumoi; two submitted, one from a unified network and one from a modular (three-cluster) network [first movement unified, second clustered]
-- **Human role, stated plainly**
-    - MIDI is the composition; instrumentation, timbre, space, and mix are a human interpretation (no notes added, removed, or moved — **confirm this is true**) [confirmed, midi was untouched]
-
----
-
-## 3. Introduction / Motivation (~250 words)
-
-- **Framing question**
-    - What happens when a neural network is an agent in its own right, not a model of a function?
-    - "Flow Control": computation handles the notes, human attention goes to everything else
-- **Lineage to cite (short, one sentence each)** [double check references, do not hallucinate here!]
-    - Liquid state machines (Maass 2002) and Echo State Networks in generative/free-running mode
-    - Kiefer's ESN instrument mapping (spectral radius as gain knob)
-    - Sakana's Continuous Thought Machines (neuron-level timing + synchronization as representation)
-    - Neuroevolution (Stanley & Miikkulainen / NEAT lineage) for gradient-free shaping of dynamics
-    - Cage / chance-determined scores: the performer's sensitivity makes the result musical
-- **Contribution bullets (what is new here, modestly stated)**
-    - Spiking reservoir used as an _autonomous sequencer_, with evolution replacing readout training
-    - Encoding insight: bake the scale into the output layer rather than evolve scale adherence
-    - A compact, idiom-aware fitness (transition-distribution KL + fractal metric weights) that resists the exploits simpler metrics fell to
-    - Modular architecture for voice independence with a single coupling parameter
+- **Unified configuration (first-generation system, second movement)**
+    - `evolve_midi_penta/2026-03-14` batch: 120 neurons, 3 readouts × 5 outputs, no modules
+    - Fitness: activity × tonal gravity × repetition (metric gravity did not exist yet)
+    - **TODO:** confirm Side A came from the Mar 14 batch and not the Mar 12 batch (which predates the tonal-gravity swap)
+- **Modular configuration (first movement)**
+    - `evolve_midi_modular/` (noon Mar 20): 255 neurons = 3 × 85, `inter_module_factor` 0.1
+    - `evolve_midi/` (evening Mar 20): same, `inter_module_factor` 0.5 (after commit "stronger inter-module connects")
+    - Fitness: activity × tonal gravity × repetition × metric gravity
+    - **TODO:** which batch produced Side B? Blog text mentions both 0.1 and 0.5; the correlation figure says 0.5
+- **Physics shared by both** (from `params.txt`, not the January notes)
+    - activation leak 0.98; refraction leak 0.75 (applied to activation while refractory, and as output decay)
+    - refractory period 2 + per-neuron integer drawn uniformly from [0, 62)
+    - network sparsity 0.2, weight scale 0.3; output sparsity 0.05, output weight scale 0.3
+    - weight threshold 0 (the functional threshold described on the project page was disabled for the final runs)
+    - argmax trigger threshold 0.3; 288 steps (16th-note grid, 72 beats) at 60 BPM
+- **Search shared by both**
+    - μ=24, λ=120, 88 generations, no random injection, no speciation
+    - weight/threshold mutation rate 0.1, scale 0.01; refraction mutation rate 0.1; anneal factor 0.1, max 10×
+    - 3/5 Gaussian (five annealing groups), 2/5 differential, F=0.7
+- **Activity metric**
+    - `score = max(0, 1 − |log2(count / target)| / 2)`, target = number of simulation steps; linear in log2, not Gaussian
+- **Other consequences**
+    - The "refractory 4 / leak 0.98 / weight threshold 0.05 / 256 neurons" story belongs to the January development phase; the paper tells it as history in §3.3, not as the final configuration
+    - Tempo: 288 steps at 60 BPM is 1:12 of MIDI; each movement is 4:00. The playback tempo in the DAW is therefore an interpretive choice and must be stated. **TODO:** what tempo was used?
 
 ---
 
-## 4. System (~500 words, 1 figure)
+## 2. Paper structure (body ≈ 1,500 words, no figures unless a piano roll is added)
 
-[this section seems like it should go into an appendix, maybe brief version in human language goes here, details in appendix]
-
-- **4.1 Network physics**
-    - Update rule (4 lines of code, quote it): leaky accumulation, threshold firing, refractory reset, excitatory + inhibitory weights
-    - Default physics: 255 neurons, leak 0.98, refractory 4 (+ variation up to 30), sparsity ~5%, weight scale 0.3, functional weight threshold 0.05
-    - Why these matter: leak × refractory interplay determines whether activity survives silences (0.90/4 steps → 66% survives; 0.98 lets tension hold across gaps); inhibition beat spectral-radius tuning for dynamic variety
-- **4.2 Readout / encoding**
-    - Three readouts = three voices, each a random sparse weight pattern over the reservoir (readouts are implicit synchrony detectors)
-    - Per voice: 5 outputs → one per scale degree; argmax wins if above a fixed threshold; fixed (not adaptive) threshold so the network controls its own density
-    - Scales as pitch-class sets: In-Sen {0,1,5,7,10}, Iwato {0,1,5,6,10}, Kumoi {0,2,3,7,9}; one line changes the scale
-    - Briefly note rejected encodings: direct neuron→pitch (arpeggio soup), sync-clustering (all parameters correlated → staccato), 12-chromatic argmax (modality vs diversity conflict), motion encoding (relative intervals; viable but not used in final pieces)
-- **4.3 Modular variant (Side B)**
-    - Three contiguous blocks of 85 neurons; each voice's readout hard-masked to its module
-    - `inter_module_factor` = 0.1 sets inter/intra connection density ratio; whole network still one genome under one fitness
-    - Diagnostic: mean pairwise |Pearson| of module firing rates ≈ 0.5 at factor 0.5 (loosely coupled); coupling floor is structural, not evolved
-- **Figure 1 candidate** [not sure we need figures if they don't yield information, no figures just for the sake of having some]
-    - Schematic: reservoir (3 modules) → 3 readouts × 5 outputs → MIDI piano roll; or reuse a `module_graphs/` plot
-
----
-
-## 5. Evolution and fitness (~450 words, 1 figure or table)
-
-[same as system, seems like a some of this is appendix]
-
-- **5.1 Search**
-    - (μ+λ) ES, μ=24, λ=120, 88 generations, 288 steps at 60 BPM per evaluation; no crossover (wrecks the weight balance)
-    - Offspring split: 3/5 Gaussian mutation under five annealing strategies (none / scale↑ / scale↓ / rate↑ / rate↓, driven by parent age), 2/5 differential (`child = parent + F·(better − worse)`, F=0.7)
-    - Differential is self-scaling: large early steps when population diverse, fine-tuning after convergence; fitness ~0.8 in 2 generations vs ~48 with Gaussian only
-    - Topology evolvable (zero weights can mutate in), functional threshold prunes weak links
-- **5.2 Fitness = activity × tonal gravity × repetition × metric gravity (all per-voice, min across voices)**
-    - _Activity_: log-space Gaussian around a target note density — penalizes both silence and spam
-    - _Tonal gravity_: KL divergence between each voice's pitch-class transition distribution and a hand-written 5×5 target matrix per scale (encodes the C↔Db pull in In-Sen, dual semitone poles in Iwato, D↔Eb color over the C–G fifth in Kumoi); subsumes pitch-entropy
-    - _Repetition_: n-gram repetition penalty for sequential monotony that distributional metrics cannot see
-    - _Metric gravity_: fractal weights over a 16-step cycle `[4,0,1,0,2,0,1,0,3,0,1,0,2,0,1,0]`; peaked score so root/fifth on strong beats ~50% of the time is ideal, all-root penalized
-    - Multiplicative so each factor gates: great rhythm with no tonal center ≈ 0
-- **5.3 Failure modes that shaped the design (this is the interesting part for reviewers — keep 4–5 crisp bullets)**
-    - Percentile/peak-relative thresholds forced density → evolution couldn't learn sparsity
-    - Global diversity gamed by four voices each repeating one note → per-voice min
-    - Per-transition tonal scoring gamed by C↔Db oscillators (0.94 score, sounded terrible) → joint-distribution KL
-    - Refractory minimum 2 → every-other-step spike trains as sole attractor → raised to 4, leak to 0.98
-    - Premature convergence in ~5 generations; speciation/fitness sharing didn't help — landscape, not diversity, was the problem
-    - Eleven-metric musicology fitness surpassed _Music for Airports_ in 37 generations → fitness too complex, stripped down
-- **Figure 2 / Table candidate**
-    - `evolution_history.png` from the submitted runs (fitness + components), or a params table (move to appendix if tight)
+- **Title:** *A Small Nervous System as Sequencer: Neuroevolved Spiking Networks for Three-Voice Pentatonic Music*
+- **Abstract (~150 words)**
+    - Stance: network treated as an autonomous dynamical system, no training data, no input
+    - Method in one sentence; fitness as four multiplicative terms
+    - Result: twelve pieces, three scales, two configurations; two movements submitted
+    - Human role: MIDI is the score; instrumentation, timbre, space, mix, and tempo are interpretation; MIDI unaltered
+- **1. Introduction (~250 words)**
+    - Framing: computation handles the notes; human attention goes to everything else
+    - Lineage: liquid state machines (Maass et al. 2002), ESNs (Jaeger 2001) in free-running mode, Kiefer 2014, CTM (Darlow et al. 2025), neuroevolution (Stanley & Miikkulainen 2002), differential evolution (Storn & Price 1997), Cage via Pritchett 1993
+    - Contributions, stated modestly: autonomous spiking reservoir as sequencer; scale baked into the readout; compact idiom-aware fitness; modular coupling parameter for voice independence
+- **2. System (~350 words, conceptual; numbers go to Appendix B)**
+    - 2.1 Network: leaky threshold neurons, excitatory and inhibitory weights, per-neuron refractory periods; the update rule in words, listing in Appendix A
+    - 2.2 Readout and encoding: three readouts = three voices; five outputs per voice = scale degrees; argmax above a fixed threshold; why fixed not adaptive
+    - 2.3 Modular configuration: three blocks, readouts masked to blocks, one coupling parameter; whole network is one genome
+- **3. Evolution and fitness (~400 words)**
+    - 3.1 Search: (μ+λ), Gaussian with age-based annealing plus differential mutation; no crossover
+    - 3.2 Fitness: four terms, each per voice with min aggregation, multiplicative; one sentence per term, definitions in Appendix C
+    - 3.3 Design history: four or five failure modes that forced the design (adaptive thresholds, per-transition gravity exploit, global diversity exploit, over-specified eleven-metric fitness, scale as a chromatic objective)
+- **4. The submitted work (~350 words)**
+    - 4.1 Two movements: first from the modular configuration, second from the unified one; scales [TODO]; no cherry-picking across runs beyond taking each run's best-of-run file [confirm phrasing]
+    - 4.2 Interpretation: one instrument per voice, effects, spatialization, mix, tempo; MIDI note data unaltered; fitness never evaluated audio; Cage/Pritchett paragraph
+    - 4.3 Listening notes: voice independence vs entrainment; semitone gestures of the scale; downbeat anchoring (first movement only); silence as structure
+- **5. Discussion (~200 words)**
+    - Physics over search; encoding over fitness; evolution as a blunt instrument; simplicity
+    - Limitations: no long-range form; hand-written idiom targets; no listening study
+    - No future-work section
+- **References**
+- **Appendix A: update rule** (code listing from `network.py`, ~15 lines)
+- **Appendix B: hyperparameters** (one table, two columns for unified/modular, differences marked)
+- **Appendix C: fitness definitions** (activity formula, KL and smoothing, n-gram penalty, metric weight vector, stable-tone sets, transition targets for the two scales used)
 
 ---
 
-## 6. The pieces and the human interpretation (~300 words)
+## 3. Figures
 
-- **6.1 What the network delivered**
-    - Twelve best-of-run MIDI files (4 per scale); sparse, rhythmically uneven, bursts separated by lulls — a good fit for a tradition that values silence [once the system was decided, we simply did n runs, there was no cherry-picking of midi]
-    - Side A (unified reservoir): voices entrained, tend to move together
-    - Side B (modular): distinct rhythmic identities per voice, grounded by metric gravity; pitch histograms lean toward root/fifth without collapsing
-    - Submitted tracks: **[Track X] — scale, side, seed/run**; **[Track Y] — scale, side, seed/run** (fill in)
-    - [i don't think we need to match seed and run]
-    - [will submit: "The Enduring Enso / Echo Chamber" which is a B-side section followed by an A-side section (yes, an artistic decision to do B then A)]
-- **6.2 Interpretation in the studio (recommendation: highlight, don't hide — see §9)**
-    - Composition vs interpretation framing: the MIDI is a score; instrument choice, timbre, effects (reverb, delay, saturation, filtering), spatialization, and mix are performance decisions
-    - State the boundary exactly: notes, pitches, onsets, durations, and voice assignments unchanged from the evolved MIDI (**verify**; if anything was edited — tempo, transposition, trimmed length to 4:00, velocity — say so explicitly) [no midi was changed, nothing repeated, etc. midi is truth]
-    - Note that no automatic evaluation covered the audio stage; the fitness function only ever saw symbolic MIDI
-    - Cage analogy, one or two sentences: chance-determined scores became music through the performers' sensitivity [yes this is critical]
-- **6.3 Listening guide (3–4 bullets reviewers can verify against the audio)**
-    - Voice independence vs entrainment (A vs B)
-    - Semitone tension/resolution gestures characteristic of each scale
-    - Downbeat anchoring on root/fifth; long silences as structure
+- Default: none. Nothing in the evolution plots or schematics changes a jury's reading of the piece.
+- Optional single figure: piano roll of the opening of one movement, exported from the DAW session (the actual submitted MIDI). Do not substitute a `midi_graphs/` image from an unmatched run.
 
 ---
 
-## 7. Discussion / Lessons (~250 words)
+## 4. Production disclosure (resolved)
 
-- **Network physics > evolutionary cleverness**
-    - Leak, refractory, sparsity, weight scale define the reachable space; a 0.90→0.98 leak change outperformed any mutation scheme
-- **Encoding is everything**
-    - Baking the scale in removed a Pareto conflict and made the fitness honest
-- **Evolution is a blunt instrument for chaotic systems**
-    - Most mutations destructive; mutation scale had to drop to 0.001–0.01; weight-threshold dead zone freezes topology after convergence
-- **Simplicity won**
-    - Final system: 255 neurons, 3 voices × 5 outputs, 4-term fitness; every added complexity (11 metrics, adaptive thresholds, speciation) hurt
-- **Limitations (be upfront)**
-    - Local coherence, no large-scale form or arc — acceptable for ambient/meditative music, not for other idioms
-    - Fitness encodes the author's idiom targets by hand; this is curation, not learned style
-    - Metrics are proxies; no listening study
-- **Future work (2–3 bullets)** [leave this out]
-    - CMA-ES or similar covariance-aware search to cross the threshold dead zone
-    - Nested networks or slow external modulation for long-range form
-    - Evolve timbre/dynamics so the human stage shrinks — or deliberately keep it as the human's domain
+- One paragraph in §4.2, one clause in the abstract, one row in Appendix B (tempo)
+- State what was done: instrument per voice, reverb, delay, saturation, filtering, spatialization, mix, playback tempo
+- State what was not done: no notes added, removed, moved, or revoiced; no repeats; fitness only ever saw MIDI; production was not iterated against any metric
+- Framing: score and interpretation; the project's broader premise is that notes and sound are separable, with the human as interpreter of an algorithmic score
 
 ---
 
-## 8. Appendix (≤ 2 pages, optional but recommended)
+## 5. Open items
 
-[really? for each run? i don't think anyone cares and this is a ton of work to produce]
-
-- **A. Hyperparameter table**
-    - From `params.txt` of the two submitted runs: μ, λ, generations, sim_steps, tempo, mutation rates/scales, anneal factor, seed, neurons, modules, inter_module_factor
-- **B. Fitness details**
-    - The three 5×5 transition target matrices (compact), stable-tone sets, metric weight vector, activity target formula
-- **C. Plots**
-    - Evolution history for each submitted run; per-voice pitch histograms; module correlation plot (Side B)
-- **D. Sheet music (optional)**
-    - Piano-roll excerpt is probably more honest than engraved notation; if engraving, render the evolved MIDI via music21/MuseScore and label it "unedited network output"
-- **E. Production notes**
-    - Instrument per voice, effects chain summary, anything altered relative to MIDI
-
----
-
-## 9. On the studio production question (recommendation)
-
-- **Highlight it, framed as interpretation, with an explicit boundary**
-    - The call allows "human-enhanced AI-generated scores" — disclosure is required for eligibility clarity, so silence is the riskier choice
-    - Reviewers listen to audio; if it sounds better than typical AI music and the abstract pretends it's raw, that reads as misleading; if it's framed as score + interpretation, the quality becomes a feature of the methodology
-    - The Cage/performer framing you already wrote is exactly the right rhetorical move and fits the workshop's "human-AI co-creation" and "AI music interpretation" topics
-- **Be precise about what the human did not do**
-    - No pitch, timing, or voice edits (if true); fitness never evaluated audio; production was not iterated against any metric
-    - This keeps the "composition" claim clean while being honest about the "sound" [yes, this is part of my broader flow control investigation, where we divorce notes from final sound, a human is the interpreter of an ai score]
-- **Keep it proportionate**
-    - ~1 paragraph in §6.2, one bullet in the abstract, one row in the appendix — not a section of its own
-
----
-
-## 10. Open items for you to fill in
-
-- Track → side/scale/run mapping; confirm total audio ≤ 10:00 [two movement piece, 8 minutes]
-- Confirm nothing in the MIDI was edited before production (tempo? transposition? trimming to 4:00? velocity?) [midi as is]
-- Decide: two tracks as one entry vs two entries [one entry, will contact tracks]
-- Anonymous audio link [where to stick it? make soundcloud account?]
-- Which figures: architecture schematic (needs drawing) + one evolution plot, or two existing plots [i am not sure that figures add anything to the paper]
-- Final 256 vs 255 neuron count — be consistent (final modular runs use 255 = 3×85) [code is truth]
-- IEEE template (Overleaf) and author-blind check before export
-- [the airballoon form asks for file uploads but also asks for an abstract. one gets the sense that this is meant to be an abstract of the abstract? though it does say latex supported and use $...$ for inline math, hard to say.]
+- Scale of each movement (needed for §4.3 and Appendix C)
+- Side A batch: Mar 12 or Mar 14? (determines whether the second movement's fitness included tonal gravity)
+- Side B batch: `inter_module_factor` 0.1 or 0.5?
+- DAW playback tempo
+- Instrument list per voice, brief effects summary (one sentence)
+- Whether to include the piano-roll figure
+- Verify references marked [verify] in the draft
+- Deadline: Nov 9 vs Nov 16; check the form
