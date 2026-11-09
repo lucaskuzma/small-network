@@ -206,8 +206,6 @@ entropy    = min(1, H / log2(7))
 diversity  = 0.5 · entropy + 0.5 · repetition
 ```
 
-The normalization by log2(7) is carried over from the earlier seven-note version of the system; for a five-note scale the entropy component cannot exceed log2(5)/log2(7) ≈ 0.83.
-
 **Tonal gravity** (movement 1). Let `q` be the target distribution over the 20 ordered pairs of distinct scale degrees, and `p` the observed distribution of a voice's transitions between distinct degrees, with additive smoothing α = 1. A voice with fewer than four notes or fewer than eight such transitions scores 0. Otherwise
 
 ```
