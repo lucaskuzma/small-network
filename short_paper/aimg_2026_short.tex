@@ -15,8 +15,7 @@
 
 \title{A Small Nervous System as Sequencer: Neuroevolved Spiking Networks for Three-Voice Pentatonic Music}
 
-\author{\IEEEauthorblockN{Anonymous Author(s)}
-\IEEEauthorblockA{Submission to the AI Music Composition Competition, AIMG 2026}}
+\author{\IEEEauthorblockN{Anonymous Author(s)}}
 
 \maketitle
 
@@ -35,6 +34,8 @@ Most neural music generators are trained on data and sampled. Here the network i
 The architecture is a reservoir in the sense of liquid state machines~\cite{maass2002} and echo state networks~\cite{jaeger2001}. In those frameworks the reservoir is random and fixed and the readout is trained by regression against target data. Here no musical data is used: evolution determines both the reservoir and the readout, and the network runs freely after a single initial stimulus.
 
 The division of labor between algorithm and interpreter was inspired by John Cage, some of whose chance compositions leave decisions to the performer~\cite{pritchett1993}. The network's MIDI output is the score, and a human interprets it.
+
+The contributions are practical. A spiking reservoir serves as an autonomous sequencer, with evolution replacing readout training. Building the scale into the readout removes a conflict between tonal consistency and pitch diversity that otherwise stalls the search. A fitness term comparing each voice's full distribution of melodic transitions with a target resists exploits that defeated simpler metrics. A modular topology yields rhythmically distinct voices within a single evolved genome.
 
 \section{System}
 
